@@ -1,0 +1,27 @@
+# Python
+__pycache__/
+*.py[cod]
+.ipynb_checkpoints/
+
+# Environments
+.env
+.venv/
+venv/
+*.egg-info/
+
+# Large model/data/cache files
+models/
+data/hf_datasets/
+data/raw/
+data/processed/
+outputs/
+logs/
+
+# Hugging Face / wandb
+.cache/
+wandb/
+.huggingface/
+
+# OS/editor
+.DS_Store
+.vscode/
