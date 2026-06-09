@@ -25,3 +25,15 @@ wandb/
 # OS/editor
 .DS_Store
 .vscode/
+
+
+# Docs & AI Configuration Files 
+CLAUDE.md
+/docs
+
+# Temporary & Experimental Scripts
+*_smoke.py
+configs/sft/*_smoke.yaml
+scripts/inspect_sft_datasets.py
+scripts/inspect_sft_samples.py
+scripts/score_math500_smoke.py

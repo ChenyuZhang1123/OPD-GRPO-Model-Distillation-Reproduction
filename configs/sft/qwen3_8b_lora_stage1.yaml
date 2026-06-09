@@ -1,0 +1,125 @@
+# ============================================================================
+# Qwen3-8B-Base LoRA SFT Stage 1 — 数学推理冷启动
+# ============================================================================
+# 目标: 在 8× RTX 3090 (24 GB each, 192 GB total) 上对 Qwen3-8B-Base 做
+#       LoRA 微调，建立 SFT baseline 用于后续 OPD/GRPO 对比。
+#
+# 数据: data/processed/sft_stage1_math_12.5k.jsonl (12,455 samples)
+#       - NuminaMath-CoT 5k (40.1%) — 详细 CoT 推理链
+#       - MATH train 7.5k (59.9%) — 简洁解答，与 MATH500 格式对齐
+# ============================================================================
+
+# ---- Model ----
+model:
+  name_or_path: "/home/zcy/OPD/models/Qwen3-8B-Base"
+  use_chat_template: false
+  torch_dtype: "bfloat16"
+  trust_remote_code: true
+  gradient_checkpointing: true
+
+# ---- Data ----
+data:
+  train_file: "data/processed/sft_stage1_math_12.5k.jsonl"
+  # 数据已预先 shuffle + dedup (seed=42)，训练时不再 shuffle
+  # 每条 JSONL 包含: prompt, response, source, dataset, split, subject, level, raw_id
+  max_seq_length: 2048
+  # 文本格式化: 将 prompt 和 response 拼接为训练文本
+  # 格式: "Problem:\n<prompt_extracted>\n\nSolution:\n<response>"
+  # prompt 中已含 "Solve the following...Problem: ...Solution:" 前缀，直接作 instruction
+
+# ---- LoRA ----
+lora:
+  r: 16
+  alpha: 32
+  dropout: 0.05
+  target_modules:
+    - "q_proj"
+    - "k_proj"
+    - "v_proj"
+    - "o_proj"
+    - "gate_proj"
+    - "up_proj"
+    - "down_proj"
+  # 覆盖 Qwen3 的 attention + MLP 线性层
+  # 总可训练参数量 ≈ 0.5-0.8% of 8B ≈ 40-65M
+
+# ---- Training ----
+training:
+  # Precision: bf16 优先，240 GB total VRAM 足够
+  # 如果 bf16 不支持 (极老的卡)，fallback 到 fp16
+  bf16: true
+  fp16: false
+
+  # Epochs: 1 对于 12.5k 小规模数据足够
+  # 2 epochs 可能导致轻微过拟合，建议先试 1 epoch
+  num_train_epochs: 1
+
+  # Single GPU: 1 × 4 grad_accum = effective 4
+  # 12,455 / 4 = ~3,114 steps per epoch (~2.2 hr)
+  per_device_train_batch_size: 1
+  gradient_accumulation_steps: 4
+
+  # Learning rate: 5e-5 对 LoRA SFT 是标准起点
+  # 理由: LoRA 仅影响小部分参数，可承受较高 lr；
+  #       2e-5 更保守，5e-5 收敛更快。先用 5e-5，监控 loss。
+  learning_rate: 5.0e-5
+
+  # Scheduler
+  lr_scheduler_type: "cosine"
+  warmup_steps: 12    # ~3% of 389 steps
+  weight_decay: 0.0
+  # weight_decay=0.0 对 LoRA 通常更好（LoRA adapters 本身即正则化）
+
+  # Optimizer
+  optim: "adamw_torch"
+
+  # Logging / Checkpoint
+  logging_steps: 5
+  save_strategy: "steps"
+  save_steps: 800
+  save_total_limit: 2
+  # ~3,114 steps total, save every 800 → ~4 checkpoints
+
+  # Evaluation: 暂不做训练中 eval（无 hold-out set）
+  # 训练后直接 evaluate on MATH500
+  eval_strategy: "no"
+
+  # Gradient
+  max_grad_norm: 1.0
+
+  # Misc
+  seed: 42
+  dataloader_num_workers: 2
+
+# ---- DeepSpeed (disabled: single GPU is sufficient for LoRA SFT) ----
+# To re-enable for multi-GPU: uncomment below and launch with:
+#   deepspeed --num_gpus=8 scripts/train_sft_lora.py --config ... --yes
+# deepspeed:
+#   zero_optimization:
+#     stage: 2
+#   bf16:
+#     enabled: true
+#   gradient_clipping: 1.0
+#   steps_per_print: 10
+
+# ---- Output ----
+output:
+  dir: "outputs/sft/qwen3_8b_lora_stage1"
+  # 如果 output_dir 已有 checkpoint，可设置 resume_from_checkpoint
+
+# ---- Notes ----
+# 1. 为什么用 LoRA 而不是全参训练?
+#    - 8B 全参需要 ~64 GB (bf16) + optimizer states → 远超单卡 24 GB
+#    - LoRA r=16 仅训练 ~0.5% 参数 → 单卡显存 < 20 GB
+#    - 8 卡 ZeRO-2 分摊后每卡 ~3-4 GB
+#    - LoRA 适合小数据 (12.5k)，不易过拟合
+#
+# 2. 为什么只用了 12.5k 小规模数据?
+#    - 目标不是训练最强模型，而是建立 SFT baseline
+#    - 12.5k 可在 ~30 分钟内完成 1 epoch (8×3090)
+#    - 快速验证 pipeline 正确性后，再考虑扩展数据规模
+#
+# 3. OPD/GRPO 接口预留:
+#    - SFT checkpoint → OPD 蒸馏的起始 student checkpoint
+#    - SFT 训练脚本的输出格式与 GRPO trainer 的 model_init 兼容
+#    - SFT baseline 评估结果作为 OPD/GRPO 对比基准

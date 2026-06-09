@@ -1,7 +1,7 @@
 # OPD/GRPO Model Distillation Reproduction
 
-复现 **Thinking Machines On-Policy Distillation (OPD)** 思路，聚焦数学推理能力的蒸馏。
-在 8× RTX 3090 上对比 **OPD 蒸馏** 与 **GRPO 强化学习** 两条路径。
+复现 **Thinking Machines On-Policy Distillation (OPD)** 思路，
+在 8× RTX 3090 上对比 **OPD** 与 **GRPO** 两种方法。
 
 ## 技术路线
 
@@ -79,35 +79,120 @@
 - Intermediate Algebra 是最弱 subject (26.8%)
 - 答案抽取 (`\boxed{}`) 基本可用，500 题仅 1 次失败
 
-## 下一步计划
+## 当前进度
 
-1. 调研 SFT 数学训练数据（NuminaMath-CoT / OpenMathInstruct 等）
-2. Qwen3-8B-Base SFT baseline on math reasoning
-3. OPD 蒸馏（Qwen3-32B teacher）
-4. GRPO 对比训练
-5. 关注弱项切片：Intermediate Algebra、Geometry、Level 4/5
+| 阶段 | 状态 | 说明 |
+|---|---|---|
+| 环境配置 | ✅ | opd-train / opd-vllm conda envs |
+| 模型下载 | ✅ | Qwen3-8B-Base (16 GB) |
+| MATH500 baseline | ✅ | 250/500 = 50.0% |
+| SFT 数据准备 | ✅ | 12,455 samples, 0 泄漏 |
+| SFT 训练 | ⏳ **待启动** | 单 GPU ~2h |
+| OPD 蒸馏 | ⏳ | 待 SFT 完成 |
+| GRPO 对比 | ⏳ | 待 SFT 完成 |
+
+### 关键文档
+
+| 文件 | 内容 |
+|---|---|
+| `docs/experiment_plan.md` | 整体实验计划 |
+| `docs/sft_data_source_survey.md` | SFT 数据源调研报告 |
+| `docs/sft_lora_stage1_plan.md` | LoRA SFT Stage1 设计文档 |
+
+## Stage1 LoRA SFT — 启动训练
+
+```bash
+# 激活环境
+conda activate opd-train
+
+# 启动单 GPU LoRA SFT
+CUDA_VISIBLE_DEVICES=0 PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True \
+  python -u scripts/train_sft_lora.py \
+    --config configs/sft/qwen3_8b_lora_stage1.yaml \
+    --yes \
+    2>&1 | tee logs/train_sft_lora_stage1.log
+
+# 多 GPU DeepSpeed
+# deepspeed --num_gpus=8 scripts/train_sft_lora.py \
+#   --config configs/sft/qwen3_8b_lora_stage1.yaml --yes \
+#   2>&1 | tee logs/train_sft_lora_stage1.log
+```
+
+### 训练后评估
+
+```bash
+# MATH500 first 50
+python -u scripts/eval_sft_checkpoint.py \
+  --adapter outputs/sft/qwen3_8b_lora_stage1/final_model \
+  --num-samples 50 --max-new-tokens 1024 \
+  2>&1 | tee logs/eval_sft_stage1_first50.log
+
+# MATH500 full 500
+python -u scripts/eval_qwen3_8b_math500.py \
+  --num_samples 500 --max_new_tokens 1024 \
+  --output_path outputs/eval/sft_stage1_math500.jsonl \
+  2>&1 | tee logs/eval_sft_stage1_full500.log
+```
+
+### 配置摘要
+
+| 参数 | 值 |
+|---|---|
+| 模型 | Qwen3-8B-Base |
+| 数据 | sft_stage1_math_12.5k.jsonl (12,455) |
+| LoRA r/alpha/dropout | 16 / 32 / 0.05 |
+| Precision | bf16 |
+| lr / scheduler / warmup | 5e-5 / cosine / 12 steps |
+| Batch size (effective) | 1 × 4 grad_accum = 4 |
+| Max seq length | 2048 |
+| Steps/epoch | ~3,114 |
+| Epochs | 1 |
+| Output | `outputs/sft/qwen3_8b_lora_stage1/` |
 
 ## 项目结构
 
 ```
 OPD/
-├── README.md                           # 本文件
-├── CLAUDE.md                           # Claude Code 项目记忆
-├── configs/env.yaml                    # 环境配置
-├── docs/experiment_plan.md            # 实验计划
-├── data/                               # 数据集
-├── logs/env_check/                     # 环境冒烟测试
-├── models/                             # 模型权重
-│   └── Qwen3-8B-Base/                  # 学生模型 (16 GB)
-├── outputs/eval/                       # 评估输出
-├── scripts/                            # 脚本
-│   └── eval_qwen3_8b_math500.py       # MATH500 评估脚本
+├── README.md
+├── CLAUDE.md
+├── configs/
+│   ├── env.yaml
+│   └── sft/
+│       ├── qwen3_8b_lora_stage1.yaml      # 正式训练配置
+│       └── qwen3_8b_lora_stage1_smoke.yaml # Smoke test 配置
+├── docs/
+│   ├── experiment_plan.md
+│   ├── sft_data_source_survey.md           # 数据源调研
+│   └── sft_lora_stage1_plan.md             # Stage1 设计
+├── data/
+│   ├── raw/ / hf_datasets/
+│   └── processed/
+│       ├── sft_numinamath_5k.jsonl
+│       ├── sft_math_train_7.5k.jsonl
+│       └── sft_stage1_math_12.5k.jsonl     # 训练数据 (12,455)
+├── models/
+│   └── Qwen3-8B-Base/
+├── outputs/
+│   ├── eval/                                # 评估结果
+│   ├── sft/
+│   │   ├── qwen3_8b_lora_stage1_smoke/     # Smoke checkpoint
+│   │   └── qwen3_8b_lora_stage1/           # 正式训练输出
+│   ├── math500_leakage_check.{json,md}
+│   └── sft_data_quality_summary.json
+├── scripts/
+│   ├── train_sft_lora.py                   # SFT 训练脚本
+│   ├── eval_qwen3_8b_math500.py            # Baseline 评估
+│   ├── eval_sft_checkpoint.py              # LoRA checkpoint 评估
+│   ├── build_sft_preview.py                # SFT 数据构建
+│   ├── check_sft_jsonl.py                  # 数据质量检查
+│   ├── check_math500_leakage.py            # 泄漏检查
+│   ├── merge_sft_jsonl.py                  # 数据合并
+│   └── inspect_sft_samples.py              # 样本抽查
+├── logs/
+│   ├── train_sft_lora_smoke.log            # Smoke 训练日志
+│   ├── eval_sft_checkpoint_first50.log     # Checkpoint 评估日志
+│   └── check_math500_leakage.log           # 泄漏检查日志
 └── src/
     └── eval/
-        └── answer_extraction.py        # 答案抽取 + exact match
+        └── answer_extraction.py
 ```
-
-## 状态
-
-✅ 环境配置完成  ✅ 学生模型下载  ✅ MATH500 baseline 完成
-⏳ SFT 训练  ⏳ OPD 蒸馏  ⏳ GRPO 对比
