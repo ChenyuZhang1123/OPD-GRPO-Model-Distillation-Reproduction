@@ -1,4 +1,9 @@
-"""MATH500 防泄漏检查 — exact match + hash match + fast prefix match。"""
+"""MATH500 防泄漏检查 — exact match + hash match + fast prefix match。
+
+用法:
+    python scripts/check_math500_leakage.py --train data/processed/sft_stage1_math_12.5k.jsonl
+    python scripts/check_math500_leakage.py --train data/processed/sft_numinamath_5k.jsonl
+"""
 
 import argparse
 import hashlib

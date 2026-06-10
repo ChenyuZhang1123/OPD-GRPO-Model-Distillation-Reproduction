@@ -1,4 +1,9 @@
-"""评估 LoRA SFT checkpoint on MATH500。"""
+"""评估 LoRA SFT checkpoint on MATH500。
+
+用法:
+    python scripts/eval_sft_checkpoint.py --adapter outputs/sft/qwen3_8b_lora_stage1/final_model
+    python scripts/eval_sft_checkpoint.py --adapter outputs/sft/qwen3_8b_lora_stage1/final_model --num-samples 500 --output outputs/eval/sft_full500.jsonl
+"""
 
 import argparse
 import json
@@ -11,12 +16,13 @@ import torch
 from transformers import AutoTokenizer, AutoModelForCausalLM
 from peft import PeftModel
 
+# Allow importing from src/
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from src.eval.answer_extraction import extract_and_match
 
 os.environ["HF_ENDPOINT"] = "https://hf-mirror.com"
 
-MODEL_PATH = "/home/zcy/OPD/models/Qwen3-8B-Base"
+MODEL_PATH = "/home/zcy/OPD/models/Qwen3-1.7B-Base"
 
 
 def main():

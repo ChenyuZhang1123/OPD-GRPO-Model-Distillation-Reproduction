@@ -1,0 +1,94 @@
+# Qwen3-1.7B-Base LoRA SFT Stage 1
+# 数据: data/processed/sft_stage1_math_12.5k.jsonl (12,455 samples)
+#       - NuminaMath-CoT 5k (40.1%) — 详细 CoT 推理链
+#       - MATH train 7.5k (59.9%) — 简洁解答，与 MATH500 格式对齐
+
+# ---- Model ----
+model:
+  name_or_path: "/home/zcy/OPD/models/Qwen3-1.7B-Base"
+  use_chat_template: false
+  torch_dtype: "bfloat16"
+  trust_remote_code: true
+  gradient_checkpointing: true
+
+# ---- Data ----
+data:
+  train_file: "data/processed/sft_stage1_math_12.5k.jsonl"
+  # 数据已预先 shuffle + dedup (seed=42)，训练时不再 shuffle
+  # 每条 JSONL 包含: prompt, response, source, dataset, split, subject, level, raw_id
+  max_seq_length: 2048
+  # 格式: "Problem:\n<prompt_extracted>\n\nSolution:\n<response>"
+  # prompt 中已含 "Solve the following...Problem: ...Solution:" 前缀，直接作 instruction
+
+# ---- LoRA ----
+lora:
+  r: 16
+  alpha: 32
+  dropout: 0.05
+  target_modules:
+    - "q_proj"
+    - "k_proj"
+    - "v_proj"
+    - "o_proj"
+    - "gate_proj"
+    - "up_proj"
+    - "down_proj"
+
+# ---- Training ----
+training:
+  # 如果 bf16 不支持，fallback 到 fp16
+  bf16: true
+  fp16: false
+
+  num_train_epochs: 1
+
+  # 8 GPU DeepSpeed ZeRO-2: 1 × 8 × 1 = effective batch 8
+  # 12,455 / 8 = ~1,557 steps per epoch (~1 hr)
+  per_device_train_batch_size: 1
+  gradient_accumulation_steps: 1
+
+  # LoRA 仅影响小部分参数，可承受较高 lr；
+  # 2e-5 更保守，5e-5 收敛更快。先用 5e-5，监控 loss。
+  learning_rate: 5.0e-5
+
+  # Scheduler
+  lr_scheduler_type: "cosine"
+  warmup_steps: 47    # ~3% of 1,557 steps
+  weight_decay: 0.0
+  # weight_decay=0.0 对 LoRA 通常更好（LoRA adapters 本身即正则化）
+
+  # Optimizer
+  optim: "adamw_torch"
+
+  # Logging / Checkpoint
+  logging_steps: 5
+  save_strategy: "steps"
+  save_steps: 400
+  save_total_limit: 2
+  # ~1,557 steps total, save every 400 → ~4 checkpoints
+
+  # Evaluation: 暂不做训练中 eval（无 hold-out set）
+  # 训练后直接 evaluate on MATH500
+  eval_strategy: "no"
+
+  # Gradient
+  max_grad_norm: 1.0
+
+  # Misc
+  seed: 42
+  dataloader_num_workers: 2
+
+# ---- DeepSpeed ----
+deepspeed:
+  train_micro_batch_size_per_gpu: 1   # = per_device_train_batch_size
+  zero_optimization:
+    stage: 2
+  bf16:
+    enabled: true
+  gradient_clipping: 1.0
+  steps_per_print: 10
+
+# ---- Output ----
+output:
+  dir: "outputs/sft/qwen3_8b_lora_stage1"
+  # 如果 output_dir 已有 checkpoint，可设置 resume_from_checkpoint

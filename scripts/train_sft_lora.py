@@ -1,8 +1,17 @@
-"""Qwen3-8B-Base LoRA SFT 训练脚本。
+"""Qwen3-1.7B-Base LoRA SFT 训练脚本。
 
 用法:
-    python -u scripts/train_sft_lora.py --config configs/sft/qwen3_8b_lora_stage1.yaml --yes
-    python -u scripts/train_sft_lora.py --config ...  --dry-run --max-samples 100
+    # Dry-run
+    python scripts/train_sft_lora.py --config configs/sft/qwen3_1.7b_lora_stage1.yaml --dry-run
+
+    # 单 GPU
+    CUDA_VISIBLE_DEVICES=0 python scripts/train_sft_lora.py \
+        --config configs/sft/qwen3_1.7b_lora_stage1.yaml --yes
+
+    # 8 GPU DeepSpeed
+    deepspeed --num_gpus=8 scripts/train_sft_lora.py \
+        --config configs/sft/qwen3_1.7b_lora_stage1.yaml --yes \
+        2>&1 | tee logs/train_sft_lora_stage1.log
 """
 
 import argparse
@@ -160,7 +169,9 @@ def train(config: dict):
     limit = data_cfg.get("max_samples") or training_cfg.get("max_samples")
     records = load_jsonl(data_cfg["train_file"], limit=limit)
     for r in records:
-        r["completion"] = r.pop("response", "")
+        # Prepend a space to ensure clean token boundary between prompt and
+        # completion, avoiding "Mismatch between tokenized prompt" warnings.
+        r["completion"] = " " + r.pop("response", "")
     dataset = Dataset.from_list(records)
     tokenizer.model_max_length = data_cfg["max_seq_length"]
 
@@ -177,11 +188,12 @@ def train(config: dict):
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Qwen3-8B-Base LoRA SFT")
+    parser = argparse.ArgumentParser(description="Qwen3-1.7B-Base LoRA SFT")
     parser.add_argument("--config", required=True)
     parser.add_argument("--dry-run", action="store_true")
     parser.add_argument("--max-samples", type=int, default=None)
     parser.add_argument("--yes", action="store_true")
+    parser.add_argument("--local_rank", type=int, default=-1)  # DeepSpeed launcher
     args = parser.parse_args()
 
     project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))

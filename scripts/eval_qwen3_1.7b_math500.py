@@ -1,9 +1,8 @@
 """
-Qwen3-8B-Base MATH500 零训练评估。
+Qwen3-1.7B-Base MATH500 零训练评估。
 
 用法:
-    python scripts/eval_qwen3_8b_math500.py --num_samples 50
-    python scripts/eval_qwen3_8b_math500.py --num_samples 100 --max_new_tokens 2048
+    CUDA_VISIBLE_DEVICES=0 python scripts/eval_qwen3_8b_math500.py
 """
 import argparse
 import json
@@ -15,23 +14,26 @@ from collections import defaultdict
 import torch
 from transformers import AutoTokenizer, AutoModelForCausalLM
 
+# Allow importing from src/
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from src.eval.answer_extraction import extract_and_match
 
 # ---------------------------------------------------------------------------
 # Parse args
 # ---------------------------------------------------------------------------
-parser = argparse.ArgumentParser(description="Qwen3-8B-Base MATH500 Evaluation")
-parser.add_argument("--num_samples", type=int, default=50,
-                    help="Number of MATH500 problems to evaluate (default: 50)")
+parser = argparse.ArgumentParser(description="Qwen3-1.7B-Base MATH500 Evaluation")
+parser.add_argument("--num_samples", type=int, default=500,
+                    help="Number of MATH500 problems to evaluate (default: 500)")
 parser.add_argument("--max_new_tokens", type=int, default=1024,
                     help="Max tokens to generate per problem (default: 1024)")
 parser.add_argument("--output_path", type=str,
-                    default="outputs/eval/qwen3_8b_math500_50.jsonl",
+                    default="outputs/eval/qwen3_1.7b_math500.jsonl",
                     help="Path for raw outputs")
 parser.add_argument("--scored_output_path", type=str,
-                    default="outputs/eval/qwen3_8b_math500_50_scored.jsonl",
+                    default="outputs/eval/qwen3_1.7b_math500_scored.jsonl",
                     help="Path for scored outputs")
+parser.add_argument("--no_log", action="store_true",
+                    help="Don't save console output to a log file")
 args = parser.parse_args()
 
 # Resolve relative paths from project root
@@ -42,18 +44,48 @@ args.scored_output_path = os.path.join(PROJECT_ROOT, args.scored_output_path)
 os.makedirs(os.path.dirname(args.output_path), exist_ok=True)
 
 # ---------------------------------------------------------------------------
+# Logging: tee stdout to a log file
+# ---------------------------------------------------------------------------
+class Tee:
+    """Simultaneously write to stdout and a log file."""
+    def __init__(self, file_path):
+        self.file = open(file_path, "w", encoding="utf-8")
+        self.stdout = sys.stdout
+
+    def write(self, data):
+        self.stdout.write(data)
+        self.file.write(data)
+
+    def flush(self):
+        self.stdout.flush()
+        self.file.flush()
+
+    def close(self):
+        self.file.close()
+
+LOG_FILE = None
+if not args.no_log:
+    log_basename = os.path.splitext(os.path.basename(args.output_path))[0] + ".log"
+    LOG_FILE = os.path.join(PROJECT_ROOT, "logs", log_basename)
+    os.makedirs(os.path.dirname(LOG_FILE), exist_ok=True)
+    _tee = Tee(LOG_FILE)
+    sys.stdout = _tee
+
+# ---------------------------------------------------------------------------
 # Setup
 # ---------------------------------------------------------------------------
 os.environ["HF_ENDPOINT"] = "https://hf-mirror.com"
-MODEL_PATH = "/home/zcy/OPD/models/Qwen3-8B-Base"
+MODEL_PATH = "/home/zcy/OPD/models/Qwen3-1.7B-Base"
 
 print("=" * 60)
-print("Qwen3-8B-Base MATH500 Zero-shot Evaluation")
+print("Qwen3-1.7B-Base MATH500 Zero-shot Evaluation")
 print(f"Model:       {MODEL_PATH}")
 print(f"Samples:     {args.num_samples}")
 print(f"Max tokens:  {args.max_new_tokens}")
 print(f"Output:      {args.output_path}")
 print(f"Scored:      {args.scored_output_path}")
+if LOG_FILE:
+    print(f"Log:         {LOG_FILE}")
 print("=" * 60)
 
 # ---------------------------------------------------------------------------
@@ -89,10 +121,11 @@ model = AutoModelForCausalLM.from_pretrained(
 )
 print(f"  Loaded in {time.time() - t0:.1f}s")
 print(f"  Params: {sum(p.numel() for p in model.parameters()) / 1e9:.2f}B")
-for i in range(torch.cuda.device_count()):
-    mem = torch.cuda.memory_allocated(i) / 1024**3
-    if mem > 0.01:
-        print(f"  GPU {i}: {mem:.2f} GB allocated")
+if torch.cuda.is_available():
+    for i in range(torch.cuda.device_count()):
+        mem = torch.cuda.memory_allocated(i) / 1024**3
+        if mem > 0.01:
+            print(f"  GPU {i}: {mem:.2f} GB allocated")
 
 # ---------------------------------------------------------------------------
 # 4. Inference loop
@@ -110,8 +143,7 @@ total_output_tokens = 0
 subject_stats = defaultdict(lambda: {"correct": 0, "total": 0})
 level_stats   = defaultdict(lambda: {"correct": 0, "total": 0})
 
-for idx in range(num_samples):
-    example = problems[idx]
+for idx, example in enumerate(problems):
     problem_text = example["problem"]
     gold_answer  = example.get("answer", "")
     subject      = example.get("subject", "Unknown")
@@ -125,8 +157,10 @@ for idx in range(num_samples):
         "Solution:"
     )
 
+    # Tokenize
     inputs = tokenizer(prompt, return_tensors="pt").to(model.device)
 
+    # Inference
     torch.cuda.synchronize()
     t_start = time.time()
 
@@ -135,7 +169,7 @@ for idx in range(num_samples):
             **inputs,
             max_new_tokens=args.max_new_tokens,
             do_sample=False,
-            temperature=1.0,
+            temperature=1.0,        # ignored when do_sample=False
             pad_token_id=tokenizer.pad_token_id,
             eos_token_id=tokenizer.eos_token_id,
         )
@@ -143,7 +177,9 @@ for idx in range(num_samples):
     torch.cuda.synchronize()
     elapsed = time.time() - t_start
 
+    # Decode
     full_output = tokenizer.decode(outputs[0], skip_special_tokens=True)
+    # Strip the prompt to get only the generated part
     generated = full_output[len(prompt):] if full_output.startswith(prompt) else full_output
 
     prompt_tokens = inputs.input_ids.shape[1]
@@ -166,10 +202,11 @@ for idx in range(num_samples):
         level_stats[level]["correct"] += 1
 
     gpu_mem = {}
-    for i in range(torch.cuda.device_count()):
-        a = torch.cuda.memory_allocated(i) / 1024**3
-        if a > 0.01:
-            gpu_mem[f"gpu_{i}_gb"] = round(a, 2)
+    if torch.cuda.is_available():
+        for i in range(torch.cuda.device_count()):
+            a = torch.cuda.memory_allocated(i) / 1024**3
+            if a > 0.01:
+                gpu_mem[f"gpu_{i}_gb"] = round(a, 2)
 
     result = {
         "index": idx,
@@ -243,4 +280,11 @@ for lvl in sorted(level_stats.keys(), key=int):
 
 print(f"\n  Raw outputs:    {args.output_path}")
 print(f"  Scored outputs: {args.scored_output_path}")
+if LOG_FILE:
+    print(f"  Log file:       {LOG_FILE}")
 print(f"{'=' * 60}")
+
+# Restore stdout and close log
+if LOG_FILE:
+    sys.stdout.close()
+    sys.stdout = sys.__stdout__

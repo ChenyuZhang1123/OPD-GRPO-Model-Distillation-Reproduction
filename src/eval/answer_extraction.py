@@ -19,15 +19,13 @@ def extract_boxed_answer(text: str) -> Optional[str]:
     参数
     ----
     text : str
-        模型生成的完整文本（含 prompt 或不含均可，函数会搜索全文）
+        模型生成的完整文本
 
     返回
     ----
     Optional[str]
         提取到的 boxed 内容，未找到则返回 None
     """
-    # 匹配 \boxed{...}，处理嵌套花括号
-    # 模式：\boxed 后跟一个花括号组，用栈匹配嵌套
     pattern = r'\\boxed\s*\{'
     matches = list(re.finditer(pattern, text))
     if not matches:
@@ -35,7 +33,7 @@ def extract_boxed_answer(text: str) -> Optional[str]:
 
     # 取最后一个匹配
     last_match = matches[-1]
-    start = last_match.end() - 1  # 指向开括号 '{'
+    start = last_match.end() - 1  # 指向'{'
 
     # 栈匹配嵌套花括号
     depth = 0
@@ -153,7 +151,7 @@ def normalize_answer(ans: str) -> str:
     # 压缩连续空白
     ans = re.sub(r'\s+', ' ', ans)
 
-    # 去掉多余空格（LaTeX 中空格不关键，但这里保留单空格分割）
+    # 去掉多余空格
     # 去掉花括号/括号前后的多余空格
     ans = re.sub(r'\s*([{}()\[\]])\s*', r'\1', ans)
 
@@ -192,7 +190,7 @@ def exact_match(pred_answer: str, gold_answer: str) -> bool:
 
 def extract_and_match(model_output: str, gold_answer: str) -> Tuple[str, bool, str]:
     """
-    端到端流程：从模型输出中抽取答案 → 规范化 → 比较。
+    从模型输出中抽取答案 → 规范化 → 比较。
 
     参数
     ----

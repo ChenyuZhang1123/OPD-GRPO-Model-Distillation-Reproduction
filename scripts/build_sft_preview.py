@@ -51,8 +51,8 @@ def _make_record(problem, solution, source, dataset_name, split_name,
 # ---- Dataset adapters ----
 
 def _adapt_numinamath(sample, dataset_name, split_name):
-    problem = sample.get("problem") or sample.get("question")
-    solution = sample.get("solution") or sample.get("answer")
+    problem = sample.get("problem")
+    solution = sample.get("solution")
 
     if not problem and "messages" in sample:
         for m in sample["messages"]:
@@ -90,7 +90,7 @@ def _adapt_mathinstruct(sample, dataset_name, split_name):
     return _make_record(instruction, output, "mathinstruct", dataset_name, split_name,
                         f"mathinstruct_{_hash(instruction[:200])}")
 
-
+# 预写的接口
 def _adapt_openmathinstruct(sample, dataset_name, split_name):
     problem = sample.get("problem") or sample.get("question")
     solution = sample.get("generated_solution") or sample.get("solution")
@@ -100,7 +100,7 @@ def _adapt_openmathinstruct(sample, dataset_name, split_name):
     return _make_record(problem, solution, "openmathinstruct", dataset_name, split_name,
                         f"omi_{_hash(problem[:200])}", subject=p_src)
 
-
+# 只用前两个数据集做SFT
 ADAPTERS = {
     "AI-MO/NuminaMath-CoT": _adapt_numinamath,
     "EleutherAI/hendrycks_math": _adapt_hendrycks_math,

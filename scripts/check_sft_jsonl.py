@@ -1,4 +1,9 @@
-"""SFT JSONL 数据质量检查。"""
+"""SFT JSONL 数据质量检查。
+
+用法:
+    python scripts/check_sft_jsonl.py data/processed/sft_stage1_math_12.5k.jsonl
+    python scripts/check_sft_jsonl.py data/processed/sft_numinamath_5k.jsonl data/processed/sft_math_train_7.5k.jsonl
+"""
 
 import argparse
 import json
