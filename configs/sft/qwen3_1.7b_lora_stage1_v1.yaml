@@ -1,0 +1,73 @@
+# Qwen3-1.7B-Base LoRA SFT Stage 1_v1
+# 数据: data/processed/sft_stage1_math_12.5k.jsonl (12,455 samples)
+
+# ---- Model ----
+model:
+  name_or_path: "/home/zcy/OPD/models/Qwen3-1.7B-Base"
+  use_chat_template: false
+  torch_dtype: "bfloat16"
+  trust_remote_code: true
+  gradient_checkpointing: true
+
+# ---- Data ----
+data:
+  train_file: "data/processed/sft_stage1_math_12.5k.jsonl"
+  max_seq_length: 4096
+
+# ---- LoRA ----
+lora:
+  r: 16
+  alpha: 32
+  dropout: 0.05
+  target_modules:
+    - "q_proj"
+    - "k_proj"
+    - "v_proj"
+    - "o_proj"
+    - "gate_proj"
+    - "up_proj"
+    - "down_proj"
+
+# ---- Training ----
+training:
+  bf16: true
+  fp16: false
+
+  num_train_epochs: 3
+
+  # global_batch = per_device × grad_acc × world_size
+  per_device_train_batch_size: 2
+  gradient_accumulation_steps: 4
+
+  learning_rate: 1.0e-4
+
+  lr_scheduler_type: "cosine"
+  warmup_steps: 50
+  weight_decay: 0.0
+
+  optim: "adamw_torch"
+
+  logging_steps: 5
+  save_strategy: "steps"
+  save_steps: 100
+  save_total_limit: 3
+  eval_strategy: "no"
+
+  max_grad_norm: 1.0
+
+  seed: 42
+  dataloader_num_workers: 2
+
+# ---- DeepSpeed ----
+deepspeed:
+  train_micro_batch_size_per_gpu: 2
+  zero_optimization:
+    stage: 2
+  bf16:
+    enabled: true
+  gradient_clipping: 1.0
+  steps_per_print: 10
+
+# ---- Output ----
+output:
+  dir: "outputs/sft/qwen3_1.7b_lora_stage1_v1"
