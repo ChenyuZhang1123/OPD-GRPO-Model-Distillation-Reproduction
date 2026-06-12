@@ -18,7 +18,7 @@
 
     # 8 GPU DeepSpeed
     deepspeed --num_gpus=8 scripts/train_sft_lora.py \
-        --config configs/sft/qwen3_1.7b_lora_stage1_v1.yaml --yes
+    --config configs/sft/qwen3_1.7b_lora_stage1_v2.yaml --yes
 
 TensorBoard:
         服务器 tensorboard --logdir outputs/sft/qwen3_1.7b_lora_stage1_v1 --bind_all
@@ -64,6 +64,14 @@ def _prepare_record(record: dict, tokenizer) -> tuple[str, str]:
     response = record.get("response", record.get("completion", ""))
     completion = " " + response.rstrip() + tokenizer.eos_token
     return prompt, completion
+
+
+def _format_dataset(records: list, tokenizer) -> "Dataset":
+    """Apply _prepare_record to all records and return a HuggingFace Dataset."""
+    from datasets import Dataset
+    for r in records:
+        r["prompt"], r["completion"] = _prepare_record(r, tokenizer)
+    return Dataset.from_list(records)
 
 
 def _print_token_stats(records, tokenizer, max_seq):
@@ -142,7 +150,6 @@ def train(config: dict, max_samples: int = None):
     from transformers import AutoTokenizer, AutoModelForCausalLM
     from peft import LoraConfig, TaskType
     from trl import SFTTrainer, SFTConfig
-    from datasets import Dataset
 
     model_cfg = config["model"]
     data_cfg = config["data"]
@@ -150,6 +157,8 @@ def train(config: dict, max_samples: int = None):
     training_cfg = config["training"]
     output_cfg = config["output"]
     ds_cfg = config.get("deepspeed", {})
+
+    project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
     world_size = int(os.environ.get("WORLD_SIZE", "1"))
     use_ds = bool(ds_cfg and "zero_optimization" in ds_cfg and world_size > 1)
@@ -183,11 +192,21 @@ def train(config: dict, max_samples: int = None):
     # ---- data ----
     limit = max_samples or data_cfg.get("max_samples") or training_cfg.get("max_samples")
     records = load_jsonl(data_cfg["train_file"], limit=limit)
-    for r in records:
-        r["prompt"], r["completion"] = _prepare_record(r, tokenizer)
-    dataset = Dataset.from_list(records)
+    train_dataset = _format_dataset(records, tokenizer)
     tokenizer.model_max_length = data_cfg["max_seq_length"]
-    print(f"  Dataset: {len(dataset)} samples, max_seq_length={data_cfg['max_seq_length']}")
+
+    eval_file = data_cfg.get("eval_file")
+    if eval_file:
+        if not os.path.isabs(eval_file):
+            eval_file = os.path.join(project_root, eval_file)
+        eval_records = load_jsonl(eval_file)
+        eval_dataset = _format_dataset(eval_records, tokenizer)
+    else:
+        eval_dataset = None
+
+    print(f"  Train: {len(train_dataset)} samples, max_seq_length={data_cfg['max_seq_length']}")
+    if eval_dataset is not None:
+        print(f"  Eval:  {len(eval_dataset)} samples ({len(eval_dataset)/len(train_dataset)*100:.1f}% of train)")
 
     # ---- LoRA ----
     peft_config = LoraConfig(
@@ -219,6 +238,9 @@ def train(config: dict, max_samples: int = None):
         bf16=use_bf16,
         fp16=use_fp16,
         logging_steps=training_cfg["logging_steps"],
+        eval_strategy=training_cfg.get("eval_strategy", "no"),
+        eval_steps=training_cfg.get("eval_steps"),
+        per_device_eval_batch_size=training_cfg.get("per_device_eval_batch_size", 8),
         save_strategy=training_cfg.get("save_strategy", "steps"),
         save_steps=training_cfg.get("save_steps", 500),
         save_total_limit=training_cfg.get("save_total_limit", 2),
@@ -235,7 +257,7 @@ def train(config: dict, max_samples: int = None):
 
     trainer = SFTTrainer(
         model=model, processing_class=tokenizer, args=training_args,
-        train_dataset=dataset, peft_config=peft_config)
+        train_dataset=train_dataset, eval_dataset=eval_dataset, peft_config=peft_config)
 
     # ---- param count (after PEFT applied) ----
     total = sum(p.numel() for p in trainer.model.parameters())
@@ -246,9 +268,10 @@ def train(config: dict, max_samples: int = None):
 
     trainer.train()
 
-    # ---- save training logs ----
+    # ---- save training logs (rank 0 only) ----
+    local_rank = int(os.environ.get("LOCAL_RANK", 0))
     log_history = trainer.state.log_history
-    if log_history:
+    if log_history and local_rank == 0:
         import csv
         log_dir = output_cfg["dir"]
         os.makedirs(log_dir, exist_ok=True)

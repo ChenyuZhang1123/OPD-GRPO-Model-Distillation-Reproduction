@@ -4,10 +4,12 @@ Qwen3-1.7B-Base MATH500 批量推理评测。
 
 用法
 # 1. 评估 base model
-CUDA_VISIBLE_DEVICES=7 python scripts/eval_qwen3_1.7b_math500.py --batch-size 64
+CUDA_VISIBLE_DEVICES=0 python scripts/eval_qwen3_1.7b_math500.py --batch-size 64
 
 # 2. 评估 LoRA checkpoint
-CUDA_VISIBLE_DEVICES=7 python scripts/eval_qwen3_1.7b_math500.py --adapter outputs/sft/qwen3_1.7b_lora_stage1_v1/final_model --batch-size 64
+CUDA_VISIBLE_DEVICES=7 python scripts/eval_qwen3_1.7b_math500.py --adapter outputs/sft/qwen3_1.7b_lora_stage1_v2/final_model --batch-size 64
+CUDA_VISIBLE_DEVICES=6 python scripts/eval_qwen3_1.7b_math500.py --adapter outputs/sft/qwen3_1.7b_lora_stage1_v2/checkpoint-1600 --batch-size 64
+CUDA_VISIBLE_DEVICES=4 python scripts/eval_qwen3_1.7b_math500.py --adapter outputs/sft/qwen3_1.7b_lora_stage1_v2/checkpoint-2000 --batch-size 64
 """
 
 import argparse
