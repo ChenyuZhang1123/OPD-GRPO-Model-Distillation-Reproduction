@@ -18,7 +18,7 @@
 
     # 8 GPU DeepSpeed
     deepspeed --num_gpus=8 scripts/train_sft_lora.py \
-    --config configs/sft/qwen3_1.7b_lora_stage1_v2.yaml --yes
+    --config configs/sft/qwen3_1.7b_lora_stage1_v3.yaml --yes
 
 TensorBoard:
         服务器 tensorboard --logdir outputs/sft/qwen3_1.7b_lora_stage1_v1 --bind_all

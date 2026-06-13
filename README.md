@@ -38,7 +38,9 @@
 | Qwen3-8B-Base | `models/Qwen3-8B-Base/` | 16 GB |
 | **Qwen3-1.7B-Base (当前学生模型)** | `models/Qwen3-1.7B-Base/` | 3.4 GB |
 | MATH-500 数据集 | `data/hf_datasets/` | ~400 KB |
+| OpenR1-Math-220k | `data/hf_datasets/` | 93,733 samples (default) |
 | SFT 训练数据 | `data/processed/sft_stage1_math_12.5k.jsonl` | 12,455 samples |
+| GRPO 训练数据 | `data/processed/openr1_math_grpo_train.jsonl` | 20,000 samples |
 
 ## 已完成实验
 
@@ -125,13 +127,15 @@
 | 阶段 | 状态 | 说明 |
 |---|---|---|
 | 环境配置 | ✅ | opd-train / opd-vllm conda envs |
-| 模型下载 | ✅ | Qwen3-8B-Base (16 GB) + Qwen3-1.7B-Base (3.4 GB) |
+| 模型下载 | ✅ | Qwen3-8B-Base + Qwen3-1.7B-Base |
 | MATH500 baseline (8B) | ✅ | 250/500 = 50.0% |
 | MATH500 baseline (1.7B) | ✅ | 225/500 = 45.0% |
 | SFT 数据准备 | ✅ | 12,455 samples, 0 泄漏 |
-| SFT 训练 | ⏳ | 待启动 |
-| OPD 蒸馏 | ⏳ | 待 SFT 完成 |
-| GRPO 对比 | ⏳ | 待 SFT 完成 |
+| SFT 训练 | ✅ | Qwen3-1.7B-Base LoRA, 3 epochs, outputs/sft/...v3/ |
+| GRPO 数据准备 | ✅ | OpenR1-Math-220k → 20,000 train + 500 eval |
+| GRPO 配置 & sanity | ✅ | max_comp=1792, steps=450, ~10h budget |
+| GRPO 正式训练 | ⏳ | 配置就绪，待启动 |
+| OPD 蒸馏 | ⏳ | 待 teacher 模型下载 |
 
 ## SFT 训练数据
 
@@ -209,11 +213,67 @@ python scripts/eval_qwen3_1.7b_math500.py
 | 数据 | sft_stage1_math_12.5k.jsonl (12,455) |
 | LoRA r/alpha/dropout | 16 / 32 / 0.05 |
 | Precision | bf16 |
-| lr / scheduler / warmup | 5e-5 / cosine / 47 steps |
-| Batch size (8 GPU) | 1 × 1 grad_accum = 8 effective |
-| Max seq length | 2048 |
-| Epochs | 1 |
-| Output | `outputs/sft/qwen3_1.7b_lora_stage1/` |
+| lr / scheduler / warmup | 1e-4 / cosine / 50 steps |
+| Batch size (8 GPU) | 2 × 1 × 8 = 16 effective |
+| Max seq length | 4096 |
+| Epochs | 3 |
+| Output | `outputs/sft/qwen3_1.7b_lora_stage1_v3/` |
+
+## GRPO 训练 — OpenR1-Math-220k
+
+基于 open-r1/OpenR1-Math-220k 的 LoRA GRPO 训练，直接使用 Qwen3-1.7B-Base。
+
+```bash
+conda activate opd-train
+
+# 数据准备（已完成）
+python scripts/prepare_openr1_math.py --max-train-samples 20000 --max-eval-samples 500
+
+# Dry-run
+python scripts/train_grpo_qwen3_1_7b.py --config configs/grpo/qwen3_1.7b_openr1.yaml --dry-run
+
+# 单卡 sanity (5 steps)
+CUDA_VISIBLE_DEVICES=0 python scripts/train_grpo_qwen3_1_7b.py \
+  --config configs/grpo/qwen3_1.7b_openr1.yaml --yes --max-steps 5
+
+# 8 卡正式训练 (SSH 断开后保持运行)
+nohup deepspeed --num_gpus=8 scripts/train_grpo_qwen3_1_7b.py \
+  --config configs/grpo/qwen3_1.7b_openr1.yaml --yes \
+  > /dev/null 2>&1 &
+
+# 从 checkpoint 恢复
+deepspeed --num_gpus=8 scripts/train_grpo_qwen3_1_7b.py \
+  --config configs/grpo/qwen3_1.7b_openr1.yaml --yes \
+  --resume-from-checkpoint outputs/grpo/qwen3_1.7b_openr1/checkpoint-200
+```
+
+### 训练后评估
+
+```bash
+# GRPO adapter MATH500 评估（输出名自动推导，不会覆盖 base 结果）
+CUDA_VISIBLE_DEVICES=0 python scripts/eval_qwen3_1.7b_math500.py \
+  --adapter outputs/grpo/qwen3_1.7b_openr1/final_model --batch-size 64
+
+# Base baseline
+CUDA_VISIBLE_DEVICES=0 python scripts/eval_qwen3_1.7b_math500.py \
+  --output-name qwen3_1.7b_base_math500 --batch-size 64
+```
+
+### 配置摘要
+
+| 参数 | 值 |
+|---|---|
+| 模型 | **Qwen3-1.7B-Base**（不使用 SFT checkpoint） |
+| 数据 | openr1_math_grpo_train.jsonl (20,000) |
+| LoRA r/alpha/dropout | 16 / 32 / 0.05 |
+| Precision | bf16 |
+| lr / scheduler / warmup | 5e-5 / cosine / 20 steps |
+| Batch size (8 GPU) | 2 × 2 × 8 = 32 effective |
+| num_generations | 4 |
+| max_prompt / max_completion | 2048 / 1792 |
+| max_steps | 450 (~10h on 8×3090) |
+| Reward | format_reward + correctness_reward |
+| Output | `outputs/grpo/qwen3_1.7b_openr1/` |
 
 ## 项目结构
 
@@ -222,32 +282,35 @@ OPD/
 ├── README.md
 ├── configs/
 │   ├── env.yaml
-│   └── sft/
-│       └── qwen3_1.7b_lora_stage1.yaml      # 正式训练配置
+│   ├── sft/
+│   │   └── qwen3_1.7b_lora_stage1_v3.yaml  # SFT 训练配置
+│   └── grpo/
+│       └── qwen3_1.7b_openr1.yaml          # GRPO 训练配置
 ├── data/
 │   ├── raw/ / hf_datasets/
 │   └── processed/
-│       ├── sft_numinamath_5k.jsonl
-│       ├── sft_math_train_7.5k.jsonl
-│       └── sft_stage1_math_12.5k.jsonl     # 训练数据 (12,455)
+│       ├── sft_stage1_math_12.5k.jsonl     # SFT 训练数据 (12,455)
+│       ├── openr1_math_grpo_train.jsonl    # GRPO 训练数据 (20,000)
+│       └── openr1_math_grpo_eval.jsonl     # GRPO 评测数据 (500)
 ├── docs/
 ├── logs/
 ├── models/
 │   ├── Qwen3-1.7B-Base/
 │   └── Qwen3-8B-Base/
 ├── outputs/
-│   ├── eval/                                # 评估结果
+│   ├── eval/                                # MATH500 评估结果
 │   ├── sft/
-│   │   └── qwen3_1.7b_lora_stage1/         # 正式训练输出
-│   └── math500_leakage_check.{json,md}
+│   │   └── qwen3_1.7b_lora_stage1_v3/      # SFT 训练输出
+│   └── grpo/
+│       └── qwen3_1.7b_openr1/              # GRPO 训练输出
 ├── scripts/
 │   ├── train_sft_lora.py                   # SFT 训练脚本
-│   ├── eval_qwen3_1.7b_math500.py          # Baseline 评估
-│   ├── eval_sft_checkpoint.py              # LoRA checkpoint 评估
+│   ├── train_grpo_qwen3_1_7b.py            # GRPO 训练脚本
+│   ├── prepare_openr1_math.py              # GRPO 数据准备
+│   ├── eval_qwen3_1.7b_math500.py          # MATH500 评估 (base + adapter)
 │   ├── build_sft_preview.py                # SFT 数据构建
-│   ├── check_sft_jsonl.py                  # 数据质量检查
 │   ├── check_math500_leakage.py            # 泄漏检查
-│   └── merge_sft_jsonl.py                  # 数据合并
+│   └── check_sft_jsonl.py                  # 数据质量检查
 └── src/
     └── eval/
         └── answer_extraction.py

@@ -4,12 +4,20 @@ Qwen3-1.7B-Base MATH500 批量推理评测。
 
 用法
 # 1. 评估 base model
-CUDA_VISIBLE_DEVICES=0 python scripts/eval_qwen3_1.7b_math500.py --batch-size 64
-
+CUDA_VISIBLE_DEVICES=0 python scripts/eval_qwen3_1.7b_math500.py --batch-size 64 --output-name qwen3_1.7b_base_math500
 # 2. 评估 LoRA checkpoint
-CUDA_VISIBLE_DEVICES=7 python scripts/eval_qwen3_1.7b_math500.py --adapter outputs/sft/qwen3_1.7b_lora_stage1_v2/final_model --batch-size 64
-CUDA_VISIBLE_DEVICES=6 python scripts/eval_qwen3_1.7b_math500.py --adapter outputs/sft/qwen3_1.7b_lora_stage1_v2/checkpoint-1600 --batch-size 64
-CUDA_VISIBLE_DEVICES=4 python scripts/eval_qwen3_1.7b_math500.py --adapter outputs/sft/qwen3_1.7b_lora_stage1_v2/checkpoint-2000 --batch-size 64
+CUDA_VISIBLE_DEVICES=7 python scripts/eval_qwen3_1.7b_math500.py --adapter outputs/sft/qwen3_1.7b_lora_stage1_v3/final_model --batch-size 64
+CUDA_VISIBLE_DEVICES=6 python scripts/eval_qwen3_1.7b_math500.py --adapter outputs/sft/qwen3_1.7b_lora_stage1_v3/checkpoint-1600 --batch-size 64
+CUDA_VISIBLE_DEVICES=4 python scripts/eval_qwen3_1.7b_math500.py --adapter outputs/sft/qwen3_1.7b_lora_stage1_v3/checkpoint-2000 --batch-size 64
+
+# 评测最终 LoRA adapter
+CUDA_VISIBLE_DEVICES=0 python scripts/eval_qwen3_1.7b_math500.py --adapter outputs/grpo/qwen3_1.7b_openr1/final_model --batch-size 64
+
+# 评测中间 checkpoint
+CUDA_VISIBLE_DEVICES=0 python scripts/eval_qwen3_1.7b_math500.py --adapter outputs/grpo/qwen3_1.7b_openr1/checkpoint-200 --batch-size 64
+
+# 自定义输出名（避免覆盖，也可用 --output-dir 指定目录）
+CUDA_VISIBLE_DEVICES=0 python scripts/eval_qwen3_1.7b_math500.py --adapter outputs/grpo/final_model --output-name my_eval --batch-size 64
 """
 
 import argparse
@@ -45,6 +53,9 @@ def main():
     parser.add_argument("--shard-id", type=int, default=None)
     parser.add_argument("--num-shards", type=int, default=None)
     parser.add_argument("--output-dir", default="outputs/eval")
+    parser.add_argument("--output-name", default=None,
+                        help="Custom output filename prefix. Default: auto-detect "
+                             "from --adapter or use 'qwen3_1.7b_math500' for base model.")
     args = parser.parse_args()
 
     use_shard = args.shard_id is not None and args.num_shards is not None
@@ -54,9 +65,19 @@ def main():
     os.makedirs(out_dir, exist_ok=True)
 
     # ---- output paths (with optional shard suffix) ----
+    # Auto-detect output name from adapter path, or use custom name
+    if args.output_name:
+        output_name = args.output_name
+    elif args.adapter:
+        # Derive name from adapter path: strip trailing / and take last component
+        adapter_tag = args.adapter.rstrip('/').split('/')[-1]
+        output_name = f"qwen3_1.7b_adapter_{adapter_tag}_math500"
+    else:
+        output_name = "qwen3_1.7b_math500"
+
     suffix = f"_s{args.shard_id}of{args.num_shards}" if use_shard else ""
-    raw_path = os.path.join(out_dir, f"qwen3_1.7b_math500_raw{suffix}.jsonl")
-    scored_path = os.path.join(out_dir, f"qwen3_1.7b_math500_scored{suffix}.jsonl")
+    raw_path = os.path.join(out_dir, f"{output_name}_raw{suffix}.jsonl")
+    scored_path = os.path.join(out_dir, f"{output_name}_scored{suffix}.jsonl")
 
     print("=" * 60)
     print("Qwen3-1.7B-Base MATH500 Evaluation (batched)")
@@ -116,6 +137,7 @@ def main():
     # ---- Inference loop ----
     correct = 0
     extraction_failures = 0
+    has_boxed_count = 0  # outputs containing \boxed{}
     total_time = 0.0
     total_output_tokens = 0
     subject_stats = defaultdict(lambda: {"correct": 0, "total": 0})
@@ -170,6 +192,8 @@ def main():
                     extraction_failures += 1
                 if is_correct:
                     correct += 1
+                if r'\boxed{' in generated or r'\boxed ' in generated:
+                    has_boxed_count += 1
 
                 total_output_tokens += gen_tokens
                 subject_stats[subjects[idx]]["total"] += 1
@@ -225,6 +249,7 @@ def main():
     print(f"  Total problems:        {n_total}")
     print(f"  Correct (exact match): {correct}")
     print(f"  Accuracy:              {acc:.1f}%")
+    print(f"  Boxed rate:            {has_boxed_count}/{n_total} ({has_boxed_count/n_total*100:.1f}%)")
     print(f"  Extraction failures:   {extraction_failures}")
     print(f"  Avg output tokens:     {avg_tokens:.0f}")
     print(f"  Avg time/sample:       {avg_elapsed:.1f}s")
