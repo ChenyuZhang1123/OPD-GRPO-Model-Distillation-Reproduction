@@ -8,7 +8,7 @@
 # 示例:
 #   # 用 GPU 0-6 评估 v3 所有 checkpoint
 #   bash scripts/eval_all_checkpoints.sh outputs/sft/qwen3_1.7b_lora_stage1_v3
-#
+#   bash scripts/eval_all_checkpoints.sh outputs/grpo/qwen3_1.7b_openr1
 #   # 指定 GPU
 #   bash scripts/eval_all_checkpoints.sh outputs/sft/qwen3_1.7b_lora_stage1_v3 "0,1,2,3,4,5,6"
 #

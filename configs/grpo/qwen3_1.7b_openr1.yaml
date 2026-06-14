@@ -1,137 +1,3 @@
-# ============================================================================
-# FORMAL TRAINING — tmux workflow (copy-paste into terminal)
-# ============================================================================
-#
-# ---- Create tmux session ----
-#   cd ~/OPD
-#   tmux new -s grpo_vllm
-#
-# ---- Window 0: vLLM server ----
-#   conda activate opd-vllm-trl
-#   CUDA_VISIBLE_DEVICES=0 trl vllm-serve \
-#     --model /home/zcy/OPD/models/Qwen3-1.7B-Base \
-#     --host 127.0.0.1 \
-#     --port 8000
-#
-# ---- Window 1: GRPO training (Ctrl+B, C to create new window) ----
-#   cd ~/OPD
-#   conda activate opd-train-vllm
-#   deepspeed --include localhost:1,2,3,4,5,6,7 \
-#     scripts/train_grpo_qwen3_1_7b.py \
-#     --config configs/grpo/qwen3_1.7b_openr1.yaml \
-#     --yes
-#
-# ---- Optional: 20-step stability test ----
-#   deepspeed --include localhost:1,2,3,4,5,6,7 \
-#     scripts/train_grpo_qwen3_1_7b.py \
-#     --config configs/grpo/qwen3_1.7b_openr1.yaml \
-#     --yes --max-steps 20 \
-#     --output-dir outputs/grpo/vllm_server_stability_test
-#
-# ---- tmux keys ----
-#   detach:     Ctrl+B, D
-#   reattach:   tmux attach -t grpo_vllm
-#   switch win: Ctrl+B, 0/1
-#   scroll:     Ctrl+B, [  (then PgUp/PgDn, q to exit)
-#
-# ---- GPU check (separate terminal) ----
-#   watch -n 1 nvidia-smi
-#
-# ---- VERIFY BEFORE TRAINING ----
-#   GPU 0:  vLLM server ONLY (no training processes)
-#   GPU 1-7: DeepSpeed training ONLY
-#   DeepSpeed log MUST show:
-#     WORLD INFO DICT: {'localhost': [1, 2, 3, 4, 5, 6, 7]}
-#   If it shows [0, 1, 2, ...], STOP immediately (GPU 0 conflict).
-#
-# ============================================================================
-# Qwen3-1.7B-Base LoRA GRPO on OpenR1-Math-220k
-# ============================================================================
-# BASELINE FORMAL RUN — 20k subset, 700 steps, ~4.5 hours on 7 GPUs
-# ============================================================================
-#
-# This is a BASELINE formal run, not the final optimal hyperparameter set.
-# Goal: get a first GRPO adapter + MATH500 result to compare against SFT.
-# If MATH500 shows improvement, scale up with more data and steps.
-#
-# ---- GPU allocation ----
-#   GPU 0:  vLLM server (trl vllm-serve, opd-vllm-trl env)
-#   GPU 1-7: GRPO training (DeepSpeed ZeRO-2, opd-train-vllm env)
-#   world_size = 7
-#   VERIFY: DeepSpeed log MUST show WORLD INFO DICT: {'localhost': [1,2,3,4,5,6,7]}
-#           If it shows [0,1,2,...], STOP immediately (GPU 0 conflict).
-#
-# ---- Data ----
-#   Source:    open-r1/OpenR1-Math-220k, sampled 20,000 train + 500 eval
-#   Prompts:   p50=102  p90=176  p95=209  p99=328  max=2069
-#   max_prompt_length=2048 covers 99.995% of prompts
-#
-# ---- Per step (per_device=2, grad_acc=2, num_generations=4, world_size=7) ----
-#   Global prompt batch:     2 × 2 × 7 = 28
-#   Completions/step:        28 × 4 = 112
-#   generation_batch_size:   28 (LCM of 14 and num_generations=4)
-#
-# ---- Timing (20-step vLLM server stability test, 2026-06-13) ----
-#   step_time:               ~23 s/step
-#   700 steps:               700 × 23 ≈ 16,100 s ≈ 4.5 hours
-#   Prompts needed:          700 × 28 = 19,600  (20,000 available, ~0.98× used)
-#
-# ---- Key metrics from 20-step test ----
-#   completions/mean_length:       948 tokens
-#   completions/clipped_ratio:     0.057 (5.7%)
-#   format_reward/mean:            0.936
-#   correctness_reward/mean:       0.071  (non-zero signal confirmed)
-#   reward_std:                    0.346
-#   kl:                            0.002  (stable, no divergence)
-#   GPU0 vLLM server:              ~23,298 MiB / 24,576 MiB (95%)
-#   GPU1-7 training:               ~9.2 GB/card
-#
-# ---- Hyperparameter decisions ----
-#   max_completion_length=2048    KEEP — clipped_ratio=5.7%, GPU0 near limit
-#   num_generations=4             KEEP — safe given GPU0 VRAM
-#   learning_rate=5e-5            KEEP — standard for GRPO LoRA
-#   beta=0.04                     KEEP — KL=0.002 far below concern threshold
-#   per_device_train_batch_size=2 KEEP
-#   gradient_accumulation_steps=2 KEEP
-#   max_train_samples=20000       use full 20k subset
-#   max_steps=700                 ~4.5 h, covers ~19,600 prompts
-#   save_steps=100                ~7 checkpoints over the run
-#   save_total_limit=8
-#
-# ---- Future scale-up run (NOT this run) ----
-#   If baseline MATH500 improves over SFT:
-#     max_train_samples=40000  (wider OpenR1-220k coverage)
-#     max_steps≈1400           (~9 hours)
-#   Do NOT expand dataset now — this run is baseline only.
-#
-# ============================================================================
-#
-# ---- Post-training MATH500 evaluation ----
-#
-#   Final model:
-#     conda activate opd-train-vllm
-#     CUDA_VISIBLE_DEVICES=0 python scripts/eval_qwen3_1.7b_math500.py \
-#       --adapter outputs/grpo/qwen3_1.7b_openr1/final_model \
-#       --batch-size 64 \
-#       --output-name qwen3_1.7b_grpo_openr1_final_math500
-#
-#   Intermediate checkpoints:
-#     CUDA_VISIBLE_DEVICES=0 python scripts/eval_qwen3_1.7b_math500.py \
-#       --adapter outputs/grpo/qwen3_1.7b_openr1/checkpoint-300 \
-#       --batch-size 64 \
-#       --output-name qwen3_1.7b_grpo_openr1_ckpt300_math500
-#
-#     CUDA_VISIBLE_DEVICES=0 python scripts/eval_qwen3_1.7b_math500.py \
-#       --adapter outputs/grpo/qwen3_1.7b_openr1/checkpoint-500 \
-#       --batch-size 64 \
-#       --output-name qwen3_1.7b_grpo_openr1_ckpt500_math500
-#
-#     CUDA_VISIBLE_DEVICES=0 python scripts/eval_qwen3_1.7b_math500.py \
-#       --adapter outputs/grpo/qwen3_1.7b_openr1/checkpoint-700 \
-#       --batch-size 64 \
-#       --output-name qwen3_1.7b_grpo_openr1_ckpt700_math500
-# ============================================================================
-
 # ---- Model ----
 model:
   name_or_path: "/home/zcy/OPD/models/Qwen3-1.7B-Base"
@@ -161,94 +27,57 @@ lora:
 
 # ---- GRPO hyperparameters ----
 grpo:
-  num_generations: 4           # completions per prompt per step
+  num_generations: 8           # completions per prompt per step
   num_generations_eval: 4      # same for eval
-  max_prompt_length: 2048       # covers 99.995% of prompts (p99=328, max=2069)
-  max_completion_length: 2048   # compromise: clipped_ratio ~0.10-0.15, VRAM ~18 GB
+
+  max_prompt_length: 2069      # covers 99.995% of prompts (p99=328, max=2069)
+  max_completion_length: 2048  # compromise: clipped_ratio ~0.10-0.15; vLLM GPU0 VRAM is close to full on RTX3090.
+
   temperature: 1.0             # sampling temperature for training generations
   top_p: 1.0                   # nucleus sampling
-  beta: 0.04                   # KL penalty coefficient (standard for GRPO)
-  generation_batch_size: 28    # LCM(per_device×world_size=14, num_generations=4) = 28
-  log_completions: true        # log sample completions to tensorboard
-  num_completions_to_print: 2  # how many completions to log
 
-  # vLLM generation backend — speeds up generation by 2-5× vs model.generate()
-  #
-  # IMPORTANT: TRL requires vllm to be importable in the TRAINING env even in
-  # server mode (TRL's VLLMClient imports vllm internals).
-  # Create a vLLM-capable training env BEFORE training:
-  #   conda create --name opd-train-vllm --clone opd-train
-  #   conda activate opd-train-vllm
-  #   pip install "trl[vllm]"
-  #
-  # GPU allocation — use --include, NOT --num_gpus:
-  #   --num_gpus=N ignores CUDA_VISIBLE_DEVICES and uses first N physical GPUs.
-  #   Use --include localhost:1,2,3,4,5,6,7 to pin training to GPUs 1-7.
-  #   Verify: DeepSpeed log should show WORLD INFO DICT: {'localhost': [1,2,3,4,5,6,7]}
-  #   Before training: nvidia-smi to confirm GPU 0 has only vLLM server.
-  #
-  # === Step 1: Start vLLM server (GPU 0, separate terminal) ===
-  #   conda activate opd-vllm-trl
-  #   CUDA_VISIBLE_DEVICES=0 trl vllm-serve \
-  #     --model /home/zcy/OPD/models/Qwen3-1.7B-Base \
-  #     --host 127.0.0.1 --port 8000
-  #
-  # === Step 2: Train (GPUs 1-7, separate terminal) ===
-  #   conda activate opd-train-vllm
-  #   # Speed test (5 steps):
-  #   deepspeed --include localhost:1,2,3,4,5,6,7 \
-  #     scripts/train_grpo_qwen3_1_7b.py \
-  #     --config configs/grpo/qwen3_1.7b_openr1.yaml \
-  #     --yes --max-steps 5 \
-  #     --output-dir outputs/grpo/vllm_server_speed_test
-  #
-  #   # Full training:
-  #   deepspeed --include localhost:1,2,3,4,5,6,7 \
-  #     scripts/train_grpo_qwen3_1_7b.py \
-  #     --config configs/grpo/qwen3_1.7b_openr1.yaml --yes
-  #
-  # === Troubleshooting ===
-  #   127.0.0.1:51216 timeout: collect vLLM server full logs,
-  #     trl vllm-serve --help, and training console.log.
-  #     May need TRL/vLLM version alignment or port config.
-  #
-  # === Without vLLM (standard model.generate()) ===
-  #   Set use_vllm: false below, then use opd-train as usual.
+  beta: 0.01                   # KL penalty coefficient
+  generation_batch_size: 56    # Must be divisible by num_generations=8; matches effective train batch after grad_acc.
+  
+  log_completions: false        # log sample completions to tensorboard
+  num_completions_to_print: 0  # how many completions to log
+
   use_vllm: true
   vllm_mode: "server"              # server: vLLM runs as standalone process; training env still needs vllm import
   vllm_server_host: "127.0.0.1"
   vllm_server_port: 8000
   vllm_gpu_memory_utilization: 0.3 # only used in colocate mode
   vllm_tensor_parallel_size: 1     # TP per vLLM instance (set in both colocate config & server launch)
-
+  
+  loss_type: "dapo"
+  mask_truncated_completions: true  # (if true, completions that hit max_completion_length are masked out of reward and loss to avoid penalising valid long answers)
+  
 # ---- Reward ----
 reward:
   # Reward components: format_reward (has \boxed{}?) + correctness_reward (answer match?)
-  # Both return 0 or 1, so total reward per completion is in [0, 2].
-  reward_weights: null          # null = equal weight for both reward functions
+  # correctness_reward uses math_verify first, then falls back to normalized string matching.
+  # This handles equivalent expressions such as "1/2", "\frac{1}{2}", and "0.5".
+  reward_weights: [0.1, 1.0]          # null = equal weight for both reward functions
   scale_rewards: "group"        # normalise rewards within each prompt group
-
-  # TODO: if math_verify becomes available, switch correctness_reward to use
-  # math_verify-based comparison for more robust answer matching (handles
-  # equivalent expressions like "1/2" vs "0.5").
 
 # ---- Training ----
 training:
   bf16: true
   fp16: false
 
-  # Global batch = per_device(2) × grad_acc(2) × 7 GPU = 28 prompts/step
-  # Completions/step = 28 × 4 = 112
+  # Effective train batch = per_device(2) × grad_acc(4) × 7 GPUs = 56 completions/update.
+  # With num_generations=8, this corresponds to 56 / 8 = 7 distinct prompts/update.
   per_device_train_batch_size: 2
-  gradient_accumulation_steps: 2
+  gradient_accumulation_steps: 4
 
-  learning_rate: 5.0e-5        # lower than SFT — RL is more brittle
+  learning_rate: 2.0e-5
 
   lr_scheduler_type: "cosine"
-  warmup_steps: 20
+  warmup_steps: 50
   weight_decay: 0.0
 
   optim: "adamw_torch"
+  max_grad_norm: 1.0
 
   logging_steps: 5
 
@@ -262,16 +91,14 @@ training:
   save_steps: 100              # checkpoint every 100 steps (~7 per 700-step run)
   save_total_limit: 8
 
-  max_grad_norm: 1.0
-
   seed: 42
   dataloader_num_workers: 2
 
   # Data limits
-  max_train_samples: 20000     # use full 20k subset; 700 × 28 = 19,600 prompts needed
+  max_train_samples: 20000     # 20k subset; with 7 prompts/update, 1000 steps ≈ 7000 prompts ≈ 0.35 epoch.
   max_eval_samples: 500
 
-  max_steps: 700               # 700 × 28 ≈ 19,600 prompts, ~4.5 h at ~23 s/step
+  max_steps: 1000               # 1000 updates ≈ 7000 distinct prompts; 1 epoch over 20k would be ≈2857 updates.
 
 # ---- DeepSpeed ZeRO-2 ----
 deepspeed:

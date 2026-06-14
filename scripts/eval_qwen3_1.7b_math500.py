@@ -11,7 +11,7 @@ CUDA_VISIBLE_DEVICES=6 python scripts/eval_qwen3_1.7b_math500.py --adapter outpu
 CUDA_VISIBLE_DEVICES=4 python scripts/eval_qwen3_1.7b_math500.py --adapter outputs/sft/qwen3_1.7b_lora_stage1_v3/checkpoint-2000 --batch-size 64
 
 # 评测最终 LoRA adapter
-CUDA_VISIBLE_DEVICES=0 python scripts/eval_qwen3_1.7b_math500.py --adapter outputs/grpo/qwen3_1.7b_openr1/final_model --batch-size 64
+CUDA_VISIBLE_DEVICES=7 python scripts/eval_qwen3_1.7b_math500.py --adapter outputs/grpo/qwen3_1.7b_openr1/final_model --batch-size 64
 
 # 评测中间 checkpoint
 CUDA_VISIBLE_DEVICES=0 python scripts/eval_qwen3_1.7b_math500.py --adapter outputs/grpo/qwen3_1.7b_openr1/checkpoint-200 --batch-size 64

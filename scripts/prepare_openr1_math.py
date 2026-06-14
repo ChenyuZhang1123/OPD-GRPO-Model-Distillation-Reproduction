@@ -11,7 +11,7 @@ Usage:
     # Custom sizes
     python scripts/prepare_openr1_math.py --max-train-samples 8000 --max-eval-samples 300
 
-    # Offline (no HF network access)
+    # Offline
     python scripts/prepare_openr1_math.py --local-files-only
 
 Output:

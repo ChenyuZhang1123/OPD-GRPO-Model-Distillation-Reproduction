@@ -1,47 +1,28 @@
 """Qwen3-1.7B-Base LoRA GRPO training on OpenR1-Math-220k.
+Uses trl.GRPOTrainer with LoRA adapters.  Reward = format_reward (has \boxed{}?) + correctness_reward (matches reference answer?).
 
-============================================================================
-FORMAL TRAINING — tmux workflow (copy-paste into terminal)
-============================================================================
+tensorboard --logdir outputs/grpo/qwen3_1.7b_openr1/runs/ --port 6006
 
 Create tmux session:
-    cd ~/OPD
     tmux new -s grpo_vllm
 
-Window 0 — vLLM server:
+vLLM server:
     conda activate opd-vllm-trl
     CUDA_VISIBLE_DEVICES=0 trl vllm-serve \
       --model /home/zcy/OPD/models/Qwen3-1.7B-Base \
-      --host 127.0.0.1 \
-      --port 8000
+      --host 127.0.0.1 --port 8000
 
-Window 1 — GRPO training (Ctrl+B, C to create new window):
-    cd ~/OPD
+GRPO training:
     conda activate opd-train-vllm
     deepspeed --include localhost:1,2,3,4,5,6,7 \
       scripts/train_grpo_qwen3_1_7b.py \
-      --config configs/grpo/qwen3_1.7b_openr1.yaml --yes
-
+      --config configs/grpo/qwen3_1.7b_openr1.yaml --yes \
+      --output-dir outputs/grpo/qwen3_1.7b_openr1_v1
 tmux keys:
     detach:     Ctrl+B, D
     reattach:   tmux attach -t grpo_vllm
     switch win: Ctrl+B, 0/1
     scroll:     Ctrl+B, [  (then PgUp/PgDn, q to exit)
-
-GPU check (separate terminal):
-    watch -n 1 nvidia-smi
-
-VERIFY BEFORE TRAINING:
-    GPU 0:  vLLM server ONLY (no training processes)
-    GPU 1-7: DeepSpeed training ONLY
-    DeepSpeed log MUST show:
-      WORLD INFO DICT: {'localhost': [1, 2, 3, 4, 5, 6, 7]}
-    If it shows [0, 1, 2, ...], STOP immediately (GPU 0 conflict).
-
-============================================================================
-
-Uses trl.GRPOTrainer with LoRA adapters.  Reward = format_reward (has \boxed{}?) +
-correctness_reward (matches reference answer?).
 
 Usage:
     # Dry-run
@@ -51,60 +32,12 @@ Usage:
     CUDA_VISIBLE_DEVICES=0 python scripts/train_grpo_qwen3_1_7b.py \
         --config configs/grpo/qwen3_1.7b_openr1.yaml --yes --max-steps 5
 
-    # === vLLM server mode (1 GPU server + 7 GPUs training) ===
-    #
-    # IMPORTANT — GPU allocation:
-    #   GPU 0:   vLLM server (trl vllm-serve, opd-vllm-trl env)
-    #   GPU 1-7: GRPO training (opd-train-vllm env)
-    #   Use --include to pin training to GPUs 1-7.
-    #   Do NOT use --num_gpus (it ignores CUDA_VISIBLE_DEVICES).
-    #   Verify: DeepSpeed log should show WORLD INFO DICT: {'localhost': [1,2,3,4,5,6,7]}
-    #
-    # Step 0 — Verify no training processes on GPU 0:
-    #   nvidia-smi
-    #   (Only vLLM server should appear on GPU 0)
-    #
-    # Step 1 — Start vLLM server (GPU 0, separate terminal):
-    #   conda activate opd-vllm-trl
-    #   CUDA_VISIBLE_DEVICES=0 trl vllm-serve \
-    #     --model /home/zcy/OPD/models/Qwen3-1.7B-Base \
-    #     --host 127.0.0.1 --port 8000
-    #
-    # Step 2 — Speed test (GPUs 1-7, separate terminal):
-    #   conda activate opd-train-vllm
-    #   deepspeed --include localhost:1,2,3,4,5,6,7 \
-    #     scripts/train_grpo_qwen3_1_7b.py \
-    #     --config configs/grpo/qwen3_1.7b_openr1.yaml \
-    #     --yes --max-steps 5 \
-    #     --output-dir outputs/grpo/vllm_server_speed_test
-    #
-    # Step 3 — Full training (after speed test passes):
-    #   deepspeed --include localhost:1,2,3,4,5,6,7 \
-    #     scripts/train_grpo_qwen3_1_7b.py \
-    #     --config configs/grpo/qwen3_1.7b_openr1.yaml --yes
-    #
-    # Troubleshooting:
-    #   - 127.0.0.1:51216 timeout: collect vLLM server full logs,
-    #     trl vllm-serve --help, and training console.log.
-    #     May need TRL/vLLM version alignment or port config.
-
-    # === Without vLLM (standard model.generate(), use opd-train) ===
-    # Set use_vllm: false in config, then:
-    #   conda activate opd-train
-    #   deepspeed --include localhost:1,2,3,4,5,6,7 \
-    #     scripts/train_grpo_qwen3_1_7b.py \
-    #     --config configs/grpo/qwen3_1.7b_openr1.yaml --yes
-
-    # Custom output directory
+    Speed test:
     deepspeed --include localhost:1,2,3,4,5,6,7 \
-      scripts/train_grpo_qwen3_1_7b.py \
-      --config configs/grpo/qwen3_1.7b_openr1.yaml --yes \
-      --output-dir outputs/grpo/qwen3_1.7b_openr1_v2
-
-    # Single-GPU debug (no vLLM)
-    CUDA_VISIBLE_DEVICES=5 python scripts/train_grpo_qwen3_1_7b.py \
-        --config configs/grpo/qwen3_1.7b_openr1.yaml --yes \
-        --output-dir outputs/grpo/debug_test --max-steps 5
+        scripts/train_grpo_qwen3_1_7b.py \
+        --config configs/grpo/qwen3_1.7b_openr1.yaml \
+        --yes --max-steps 5 \
+        --output-dir outputs/grpo/vllm_server_speed_test
 
     # Resume from checkpoint
     deepspeed --include localhost:1,2,3,4,5,6,7 \
@@ -132,9 +65,6 @@ from src.eval.answer_extraction import extract_and_match
 # ============================================================================
 # Reward helpers
 # ============================================================================
-
-_reward_debug_done = False
-
 
 def _get_rank():
     """Return LOCAL_RANK or RANK env var, default 0."""
@@ -210,51 +140,8 @@ def _align_answers_to_completions(answers, prompts, completions):
     else:
         return list(answers) + [""] * (n_comp - n_ans)
 
-
-def _debug_reward_once(prompts, completions, **kwargs):
-    """Print reward input shapes once (rank 0 only)."""
-    global _reward_debug_done
-    if _reward_debug_done or _get_rank() != 0:
-        return
-    _reward_debug_done = True
-
-    print("=" * 60)
-    print("[DEBUG] reward function input shapes (first call, rank 0)")
-    print(f"  len(prompts):           {len(prompts) if prompts is not None else 'None'}")
-    print(f"  len(completions):       {len(completions)}")
-    print(f"  type(completions):      {type(completions).__name__}")
-    if len(completions) > 0:
-        c0 = completions[0]
-        print(f"  type(completions[0]):   {type(c0).__name__}")
-        text = _completion_to_text(c0)
-        preview = text[:300].replace("\n", "\\n")
-        print(f"  completions[0] preview: {preview}")
-    print(f"  kwargs keys:            {list(kwargs.keys())}")
-    for k, v in kwargs.items():
-        vtype = type(v).__name__
-        try:
-            vlen = len(v)
-            print(f"    {k}: {vtype} (len={vlen})")
-        except TypeError:
-            print(f"    {k}: {vtype} (no len)")
-    answers = kwargs.get("answer")
-    if answers is not None:
-        print(f"  len(answer):            {len(answers)}")
-        for i in range(min(3, len(answers))):
-            print(f"  answer[{i}]:             {str(answers[i])[:120]}")
-    else:
-        print(f"  len(answer):            None (missing)")
-    print("=" * 60)
-
-
-# ============================================================================
-# Reward functions
-# ============================================================================
-
 def format_reward(prompts, completions, completion_ids=None, **kwargs):
     """Reward 1.0 if the completion contains \\boxed{...}, else 0.0."""
-    _debug_reward_once(prompts, completions, **kwargs)
-
     rewards = []
     for completion in completions:
         text = _completion_to_text(completion)
@@ -279,8 +166,6 @@ def correctness_reward(prompts, completions, completion_ids=None, **kwargs):
     completions via _align_answers_to_completions, which handles both
     per-prompt and per-completion answer lists.
     """
-    _debug_reward_once(prompts, completions, **kwargs)
-
     answers = kwargs.get("answer")
     if answers is None:
         return [0.0] * len(completions)
@@ -374,36 +259,64 @@ def dry_run(config: dict):
     per_device = training_cfg["per_device_train_batch_size"]
     grad_acc = training_cfg.get("gradient_accumulation_steps", 1)
     world_size = int(os.environ.get("WORLD_SIZE", 1))
-    global_bs = per_device * grad_acc * world_size
     num_gen = grpo_cfg["num_generations"]
     max_steps_val = training_cfg.get("max_steps", -1)
+    gen_batch = grpo_cfg.get("generation_batch_size", per_device * world_size)
 
-    print(f"\n  GPU count (WORLD_SIZE): {world_size}")
-    print(f"  per_device_train_batch_size: {per_device}")
-    print(f"  gradient_accumulation_steps: {grad_acc}")
-    print(f"  Global batch (distinct prompts/step): {global_bs}")
-    print(f"  num_generations per prompt: {num_gen}")
-    print(f"  Completions per step: {global_bs * num_gen}")
-    print(f"  max_completion_length: {grpo_cfg['max_completion_length']}")
-    print(f"  max_prompt_length: {grpo_cfg.get('max_prompt_length', 'N/A')}")
+    effective_train_batch = per_device * grad_acc * world_size
+    distinct_prompts_per_update = effective_train_batch // num_gen
+
+    print(f"\n  --- Training budget ---")
+    print(f"  world_size:                     {world_size}")
+    print(f"  per_device_train_batch_size:    {per_device}")
+    print(f"  gradient_accumulation_steps:    {grad_acc}")
+    print(f"  num_generations:                {num_gen}")
+    print(f"  generation_batch_size:          {gen_batch}")
+    print(f"  effective_train_batch:          {effective_train_batch} completions/update")
+    print(f"    = {world_size} × {per_device} × {grad_acc}")
+    print(f"  distinct_prompts_per_update:    {distinct_prompts_per_update}")
+    print(f"    = {effective_train_batch} / {num_gen}")
+    print(f"  completions_per_update:         {effective_train_batch}")
+    print(f"    = {distinct_prompts_per_update} prompts × {num_gen} completions")
+
+    if effective_train_batch % num_gen != 0:
+        print(f"  [WARN] effective_train_batch ({effective_train_batch}) must be "
+              f"divisible by num_generations ({num_gen}) for GRPO.")
+
+    if max_steps_val > 0:
+        import math as _math
+        num_samples = len(records) if records else training_cfg.get("max_train_samples", 0)
+        estimated_prompts = distinct_prompts_per_update * max_steps_val
+        steps_per_epoch = _math.ceil(num_samples / distinct_prompts_per_update) if distinct_prompts_per_update > 0 and num_samples > 0 else "N/A"
+        epoch_fraction = estimated_prompts / num_samples if num_samples > 0 else 0
+
+        print(f"  max_steps:                      {max_steps_val}")
+        print(f"  estimated_distinct_prompts:     {estimated_prompts}")
+        print(f"    = {distinct_prompts_per_update} prompts/update × {max_steps_val} steps")
+        print(f"  num_train_samples:              {num_samples}")
+        print(f"  steps_per_epoch:                {steps_per_epoch}")
+        print(f"    = ceil({num_samples} / {distinct_prompts_per_update})")
+        if isinstance(epoch_fraction, float):
+            print(f"  estimated_epoch_fraction:       {epoch_fraction:.2f}")
+            print(f"    = {estimated_prompts} / {num_samples}")
+
+    print(f"  max_completion_length:          {grpo_cfg['max_completion_length']}")
+    print(f"  max_prompt_length:              {grpo_cfg.get('max_prompt_length', 'N/A')}")
+
     # ---- vLLM ----
-    print(f"  use_vllm: {grpo_cfg.get('use_vllm', False)}")
+    print(f"\n  --- vLLM ---")
+    print(f"  use_vllm:                       {grpo_cfg.get('use_vllm', False)}")
     if grpo_cfg.get("use_vllm", False):
         vllm_mode = grpo_cfg.get("vllm_mode", "colocate")
-        print(f"  vllm_mode: {vllm_mode}")
+        print(f"  vllm_mode:                      {vllm_mode}")
         if vllm_mode == "server":
-            print(f"  vllm_server_host: {grpo_cfg.get('vllm_server_host', '127.0.0.1')}")
-            print(f"  vllm_server_port: {grpo_cfg.get('vllm_server_port', 8000)}")
+            print(f"  vllm_server_host:               {grpo_cfg.get('vllm_server_host', '127.0.0.1')}")
+            print(f"  vllm_server_port:               {grpo_cfg.get('vllm_server_port', 8000)}")
             print(f"  [HINT] Use --include to avoid GPU 0 conflict:")
             print(f"    deepspeed --include localhost:1,2,3,4,5,6,7 \\")
             print(f"      scripts/train_grpo_qwen3_1_7b.py ...")
-        print(f"  vllm_gpu_memory_utilization: {grpo_cfg.get('vllm_gpu_memory_utilization', 0.3)}")
-        print(f"  vllm_tensor_parallel_size: {grpo_cfg.get('vllm_tensor_parallel_size', 1)}")
-    if max_steps_val > 0:
-        total_prompts = global_bs * max_steps_val
-        print(f"  max_steps: {max_steps_val}")
-        print(f"  Total distinct prompts needed: {total_prompts}")
-        print(f"  Samples available: {len(records) if records else '?'}")
+        print(f"  vllm_gpu_memory_utilization:    {grpo_cfg.get('vllm_gpu_memory_utilization', 0.3)}")
+        print(f"  vllm_tensor_parallel_size:      {grpo_cfg.get('vllm_tensor_parallel_size', 1)}")
 
     print("=" * 60)
 
@@ -435,13 +348,13 @@ def _build_grpo_config(**kwargs):
     with upgrade instructions.  Other unknown parameters produce a warning and
     are silently dropped.
     """
-    from dataclasses import fields as dc_fields  # noqa: re-imported for clarity
+    from dataclasses import fields as dc_fields
     from trl import GRPOConfig as _GRPOConfig
     import trl
 
     valid_fields = {f.name for f in dc_fields(_GRPOConfig)}
 
-    # Parameters that are vLLM-related — if missing, the TRL version is too old.
+    # Parameters that are vLLM-related
     _VLLM_PARAMS = {
         "use_vllm", "vllm_mode", "vllm_model_impl", "vllm_enable_sleep_mode",
         "vllm_structured_outputs_regex", "vllm_server_base_url", "vllm_server_host",
@@ -467,82 +380,6 @@ def _build_grpo_config(**kwargs):
             print(f"  [WARN] GRPOConfig does not accept parameter '{key}'. Skipping.")
 
     return _GRPOConfig(**filtered)
-
-
-def check_env(config: dict):
-    """Check environment and GRPOConfig support without loading model or data."""
-    import torch
-    import transformers
-    import trl
-    from dataclasses import fields as dc_fields
-    from trl import GRPOConfig
-
-    grpo_cfg = config.get("grpo", {})
-
-    print("=" * 60)
-    print("ENVIRONMENT CHECK")
-    print(f"  Python:        {sys.executable}")
-    print(f"  torch:         {torch.__version__}  (CUDA {torch.version.cuda})")
-    print(f"  transformers:  {transformers.__version__}")
-    print(f"  trl:           {trl.__version__}")
-
-    try:
-        import vllm
-        print(f"  vllm:          {vllm.__version__}  [installed]")
-    except ImportError:
-        print(f"  vllm:          NOT INSTALLED")
-
-    print()
-    print("GRPOConfig parameter support (trl==" + trl.__version__ + "):")
-    valid = {f.name for f in dc_fields(GRPOConfig)}
-    check_params = [
-        "use_vllm",
-        "vllm_mode",
-        "vllm_server_host",
-        "vllm_server_port",
-        "vllm_gpu_memory_utilization",
-        "vllm_tensor_parallel_size",
-        "max_prompt_length",
-    ]
-    for p in check_params:
-        status = "SUPPORTED" if p in valid else "MISSING"
-        print(f"    {p:40s} {status}")
-
-    print()
-    print("Config vLLM settings:")
-    print(f"  use_vllm:                     {grpo_cfg.get('use_vllm', False)}")
-    print(f"  vllm_mode:                    {grpo_cfg.get('vllm_mode', 'colocate')}")
-    if grpo_cfg.get('vllm_mode') == 'server':
-        print(f"  vllm_server_host:             {grpo_cfg.get('vllm_server_host', '127.0.0.1')}")
-        print(f"  vllm_server_port:             {grpo_cfg.get('vllm_server_port', 8000)}")
-
-    if grpo_cfg.get("use_vllm", False):
-        try:
-            import vllm  # noqa: F401,F811
-            print()
-            print("  [OK] use_vllm=True and vllm is importable.")
-        except ImportError:
-            print()
-            print("  [WARNING] use_vllm=True but vllm is NOT installed in this env!")
-            print("    Create a vLLM-capable training env (does not pollute current env):")
-            print("      conda create --name opd-train-vllm --clone opd-train")
-            print("      conda activate opd-train-vllm")
-            print('      pip install "trl[vllm]"')
-            print()
-            print("    Verify after install:")
-            print("      python -c 'import trl, vllm, torch; print(trl.__version__, vllm.__version__)'")
-        if grpo_cfg.get('vllm_mode') == 'server':
-            print()
-            print("  [HINT] vllm_mode=server: use --include to pin training to GPUs 1-7:")
-            print("    deepspeed --include localhost:1,2,3,4,5,6,7 \\")
-            print("      scripts/train_grpo_qwen3_1_7b.py ...")
-            print("    Do NOT use --num_gpus (it ignores CUDA_VISIBLE_DEVICES).")
-            print("    Verify DeepSpeed log shows: {'localhost': [1,2,3,4,5,6,7]}")
-    else:
-        print()
-        print("  use_vllm=False — standard model.generate() will be used.")
-
-    print("=" * 60)
 
 
 def train(config: dict, max_steps_override: int = None, resume_from_checkpoint: str = None):
@@ -724,6 +561,9 @@ def train(config: dict, max_steps_override: int = None, resume_from_checkpoint: 
         # Reward
         reward_weights=reward_weights,
         scale_rewards=reward_cfg.get("scale_rewards", "group"),
+        # Loss / truncation
+        loss_type=grpo_cfg.get("loss_type", "dapo"),
+        mask_truncated_completions=grpo_cfg.get("mask_truncated_completions", False),
         # Generation batches
         generation_batch_size=grpo_cfg.get("generation_batch_size", 8),
         log_completions=grpo_cfg.get("log_completions", True),
@@ -787,30 +627,6 @@ def train(config: dict, max_steps_override: int = None, resume_from_checkpoint: 
             print(f"  [DeepSpeed] patched LRScheduler._update_lr: strict=False, "
                   f"_last_lr maintained (PyTorch >=2.12 + DeepSpeed compat)")
 
-    # ---- Diagnostic: optimizer / scheduler alignment (rank 0) ----
-    if local_rank == 0 and hasattr(trainer, 'optimizer') and trainer.optimizer is not None:
-        opt = trainer.optimizer
-        sch = getattr(trainer, 'lr_scheduler', None)
-        print(f"  [DIAG] optimizer type:         {type(opt).__name__}")
-        print(f"  [DIAG] optimizer param_groups: {len(opt.param_groups)}")
-        if sch is not None:
-            print(f"  [DIAG] scheduler type:         {type(sch).__name__}")
-            base_lrs = getattr(sch, 'base_lrs', [])
-            print(f"  [DIAG] scheduler base_lrs:     {len(base_lrs)}")
-            last_lr = getattr(sch, '_last_lr', None)
-            print(f"  [DIAG] scheduler _last_lr:     {len(last_lr) if last_lr else 'MISSING'}")
-            print(f"  [DIAG] sch.optimizer is opt:   {getattr(sch, 'optimizer', None) is opt}")
-            # Ensure _last_lr exists (belt-and-suspenders)
-            if not hasattr(sch, '_last_lr') or sch._last_lr is None:
-                sch._last_lr = [pg.get("lr", 0.0) for pg in opt.param_groups]
-                print(f"  [DIAG] initialized _last_lr:   {sch._last_lr}")
-        else:
-            print(f"  [DIAG] scheduler: None (will be created by Trainer)")
-        for i, pg in enumerate(opt.param_groups):
-            n_params = sum(p.numel() for p in pg.get('params', []))
-            print(f"  [DIAG]   pg[{i}]: lr={pg.get('lr', 'N/A')}, "
-                  f"wd={pg.get('weight_decay', 'N/A')}, params={n_params}")
-
     # ---- Train ----
     trainer.train(resume_from_checkpoint=resume_from_checkpoint)
 
@@ -856,9 +672,6 @@ def main():
                              "outputs/grpo/.../checkpoint-200")
     parser.add_argument("--yes", action="store_true",
                         help="Skip confirmation prompt")
-    parser.add_argument("--check-env", action="store_true",
-                        help="Check environment (python, torch, trl, vllm, GRPOConfig "
-                             "param support) and exit without training")
     parser.add_argument("--local_rank", type=int, default=-1)
     parser.add_argument("--local-rank", type=int, default=-1, dest="local_rank")
     args = parser.parse_args()
@@ -870,10 +683,6 @@ def main():
     # Override output dir from CLI
     if args.output_dir:
         config["output"]["dir"] = args.output_dir
-
-    if args.check_env:
-        check_env(config)
-        return
 
     if args.dry_run:
         dry_run(config)
