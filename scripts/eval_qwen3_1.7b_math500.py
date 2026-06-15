@@ -2,22 +2,34 @@
 Qwen3-1.7B-Base MATH500 批量推理评测。
 支持 base model 直接推理，也支持加载 LoRA adapter 评测 SFT/OPD/GRPO checkpoint。
 
+Prompt 格式与 GRPO train prompt 一致:
+  Question:
+  {problem}
+
+  Please solve the problem step by step and put the final answer in \\boxed{}.
+
+  Answer:
+
 用法
-# 1. 评估 base model
-CUDA_VISIBLE_DEVICES=0 python scripts/eval_qwen3_1.7b_math500.py --batch-size 64 --output-name qwen3_1.7b_base_math500
-# 2. 评估 LoRA checkpoint
-CUDA_VISIBLE_DEVICES=7 python scripts/eval_qwen3_1.7b_math500.py --adapter outputs/sft/qwen3_1.7b_lora_stage1_v3/final_model --batch-size 64
-CUDA_VISIBLE_DEVICES=6 python scripts/eval_qwen3_1.7b_math500.py --adapter outputs/sft/qwen3_1.7b_lora_stage1_v3/checkpoint-1600 --batch-size 64
-CUDA_VISIBLE_DEVICES=4 python scripts/eval_qwen3_1.7b_math500.py --adapter outputs/sft/qwen3_1.7b_lora_stage1_v3/checkpoint-2000 --batch-size 64
+  # 1. 评估 base model
+  CUDA_VISIBLE_DEVICES=0 python scripts/eval_qwen3_1.7b_math500.py \
+    --batch-size 32 --max-new-tokens 2048 --output-dir outputs/eval/qwen3_1.7b_openr1_v2/base_model \
+    > outputs/eval/qwen3_1.7b_openr1_v2/base_model/eval.log 2>&1
+    
+  # 2. 评估 LoRA checkpoint
+  CUDA_VISIBLE_DEVICES=0 python scripts/eval_qwen3_1.7b_math500.py \
+    --adapter outputs/sft/qwen3_1.7b_lora_stage1_v3/final_model \
+    --batch-size 32 --max-new-tokens 2048
 
-# 评测最终 LoRA adapter
-CUDA_VISIBLE_DEVICES=7 python scripts/eval_qwen3_1.7b_math500.py --adapter outputs/grpo/qwen3_1.7b_openr1/final_model --batch-size 64
+  # 3. 评估 GRPO checkpoint
+  CUDA_VISIBLE_DEVICES=0 python scripts/eval_qwen3_1.7b_math500.py \
+    --adapter outputs/grpo/qwen3_1.7b_openr1_v2/final_model \
+    --batch-size 32 --max-new-tokens 2048
 
-# 评测中间 checkpoint
-CUDA_VISIBLE_DEVICES=0 python scripts/eval_qwen3_1.7b_math500.py --adapter outputs/grpo/qwen3_1.7b_openr1/checkpoint-200 --batch-size 64
-
-# 自定义输出名（避免覆盖，也可用 --output-dir 指定目录）
-CUDA_VISIBLE_DEVICES=0 python scripts/eval_qwen3_1.7b_math500.py --adapter outputs/grpo/final_model --output-name my_eval --batch-size 64
+  # 4. 评估中间 checkpoint
+  CUDA_VISIBLE_DEVICES=0 python scripts/eval_qwen3_1.7b_math500.py \
+    --adapter outputs/grpo/qwen3_1.7b_openr1_v2/checkpoint-900 \
+    --batch-size 32 --max-new-tokens 2048
 """
 
 import argparse
@@ -35,12 +47,9 @@ from src.eval.answer_extraction import extract_and_match
 
 os.environ["HF_ENDPOINT"] = "https://hf-mirror.com"
 MODEL_PATH = "/home/zcy/OPD/models/Qwen3-1.7B-Base"
-PROMPT_PREFIX = (
-    "Solve the following math problem. Show your reasoning and "
-    "put the final answer in \\boxed{}.\n\n"
-    "Problem: "
-)
-PROMPT_SUFFIX = "\n\nSolution:"
+# GRPO train prompt format (must match data/processed/openr1_math_grpo_train.jsonl)
+PROMPT_PREFIX = "Question:\n"
+PROMPT_SUFFIX = "\n\nPlease solve the problem step by step and put the final answer in \\boxed{}.\n\nAnswer:"
 
 
 def main():
@@ -48,7 +57,7 @@ def main():
     parser.add_argument("--model", default=MODEL_PATH)
     parser.add_argument("--adapter", default=None, help="LoRA adapter path (optional)")
     parser.add_argument("--num-samples", type=int, default=500)
-    parser.add_argument("--max-new-tokens", type=int, default=512)
+    parser.add_argument("--max-new-tokens", type=int, default=2048)
     parser.add_argument("--batch-size", type=int, default=16)
     parser.add_argument("--shard-id", type=int, default=None)
     parser.add_argument("--num-shards", type=int, default=None)

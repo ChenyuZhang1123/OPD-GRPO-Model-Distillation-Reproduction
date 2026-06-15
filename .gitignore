@@ -34,5 +34,4 @@ CLAUDE.md
 # Temporary & Experimental Scripts
 *_smoke.py
 configs/sft/*_smoke.yaml
-scripts/inspect_sft_datasets.py
-scripts/inspect_sft_samples.py
+scripts/demo

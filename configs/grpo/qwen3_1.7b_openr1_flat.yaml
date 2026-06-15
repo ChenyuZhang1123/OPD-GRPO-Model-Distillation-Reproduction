@@ -1,0 +1,95 @@
+# ---- Model ----
+model_name_or_path: "/home/zcy/OPD/models/Qwen3-1.7B-Base"
+trust_remote_code: true
+dtype: "bfloat16"
+gradient_checkpointing: true
+
+# ---- Data ----
+train_file: "data/processed/openr1_math_grpo_train.jsonl"
+eval_file: "data/processed/openr1_math_grpo_eval.jsonl"
+dataset_prompt_column: "prompt"
+dataset_answer_column: "answer"
+
+# ---- PEFT / LoRA (trl.ModelConfig fields) ----
+use_peft: true
+lora_r: 16
+lora_alpha: 32
+lora_dropout: 0.05
+lora_target_modules:
+  - "q_proj"
+  - "k_proj"
+  - "v_proj"
+  - "o_proj"
+  - "gate_proj"
+  - "up_proj"
+  - "down_proj"
+lora_task_type: "CAUSAL_LM"
+
+# ---- GRPO / Training / Reward (trl.GRPOConfig fields) ----
+num_generations: 8
+num_generations_eval: 4
+
+max_completion_length: 2048
+
+temperature: 1.0
+top_p: 1.0
+
+beta: 0.01
+generation_batch_size: 56
+
+log_completions: false
+num_completions_to_print: 0
+
+use_vllm: true
+vllm_mode: "server"
+vllm_server_host: "127.0.0.1"
+vllm_server_port: 8000
+vllm_gpu_memory_utilization: 0.3
+vllm_tensor_parallel_size: 1
+
+loss_type: "dapo"
+mask_truncated_completions: true
+
+reward_weights: [0.1, 1.0]
+scale_rewards: "group"
+
+# ---- Training ----
+bf16: true
+
+per_device_train_batch_size: 2
+gradient_accumulation_steps: 4
+
+learning_rate: 2.0e-5
+lr_scheduler_type: "cosine"
+warmup_steps: 50
+weight_decay: 0.0
+
+optim: "adamw_torch"
+max_grad_norm: 1.0
+
+logging_steps: 5
+
+# Evaluation — disabled during training; data preserved for external eval
+eval_strategy: "no"
+per_device_eval_batch_size: 4
+
+# Checkpoint saving
+save_strategy: "steps"
+save_steps: 100
+save_total_limit: 8
+
+seed: 42
+dataloader_num_workers: 2
+
+# Data limits
+max_train_samples: 20000
+max_eval_samples: 500
+
+max_steps: 1000
+
+# ---- DeepSpeed ----
+deepspeed: "configs/grpo/ds_zero2.json"
+
+# ---- Output ----
+output_dir: "outputs/grpo/qwen3_1.7b_openr1"
+report_to: "tensorboard"
