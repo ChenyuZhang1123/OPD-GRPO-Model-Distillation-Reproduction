@@ -76,6 +76,10 @@ class OPDScriptArguments(ScriptArguments):
         default=True,
         metadata={"help": "Load teacher model in 4-bit (NF4) quantization to save GPU memory."},
     )
+    teacher_server_url: Optional[str] = field(
+        default=None,
+        metadata={"help": "If set, connect to a remote teacher server instead of loading locally."},
+    )
 
     # ---- Data limits ----
     max_train_samples: Optional[int] = field(

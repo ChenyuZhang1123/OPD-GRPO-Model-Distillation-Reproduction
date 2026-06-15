@@ -1,0 +1,93 @@
+# ---- Model (Student) ----
+model_name_or_path: "/home/zcy/OPD/models/Qwen3-1.7B-Base"
+trust_remote_code: true
+dtype: "bfloat16"
+gradient_checkpointing: true
+
+# ---- Teacher Model ----
+teacher_model_path: "/home/zcy/OPD/models/Qwen3-32B-Base"
+teacher_dtype: "bfloat16"
+teacher_device_map: "auto"
+teacher_load_in_4bit: true
+# teacher_server_url: "http://127.0.0.1:8100"  # uncomment to use remote teacher
+
+# ---- Data ----
+train_file: "data/processed/openr1_math_grpo_train.jsonl"
+eval_file: "data/processed/openr1_math_grpo_eval.jsonl"
+dataset_prompt_column: "prompt"
+dataset_answer_column: "answer"
+
+# ---- PEFT / LoRA (trl.ModelConfig fields) ----
+use_peft: true
+lora_r: 16
+lora_alpha: 32
+lora_dropout: 0.05
+lora_target_modules:
+  - "q_proj"
+  - "k_proj"
+  - "v_proj"
+  - "o_proj"
+  - "gate_proj"
+  - "up_proj"
+  - "down_proj"
+lora_task_type: "CAUSAL_LM"
+
+# ---- OPD / Generation ----
+# num_generations: 2   (was 4 — each prompt generates 2 completions, halving forward-pass work)
+# max_completion_length: 1024  (was 1792 — math reasoning rarely exceeds 1024 tokens)
+num_generations: 2
+max_completion_length: 1024
+max_prompt_length: 2048
+temperature: 1.0
+top_p: 1.0
+
+# ---- OPD-specific ----
+clip_epsilon: 0.2
+
+# ---- Loss type (compatibility with GRPOConfig) ----
+loss_type: "dapo"
+mask_truncated_completions: false
+
+# ---- Training ----
+bf16: true
+
+# per_device_train_batch_size: 2 (was 1) — doubled to keep effective batch=32
+# gradient_accumulation_steps: 4 (was 8) — halved → 4× fewer micro-batches per step
+# effective batch = 2 × 4 × 4 GPU = 32
+per_device_train_batch_size: 2
+gradient_accumulation_steps: 4
+
+learning_rate: 2.0e-5
+lr_scheduler_type: "cosine"
+warmup_steps: 15
+weight_decay: 0.0
+
+optim: "adamw_torch"
+max_grad_norm: 1.0
+
+logging_steps: 5
+
+# Evaluation — disabled during training
+eval_strategy: "no"
+per_device_eval_batch_size: 4
+
+# Checkpoint saving
+save_strategy: "steps"
+save_steps: 50
+save_total_limit: 3
+
+seed: 42
+dataloader_num_workers: 2
+
+# Data limits
+max_train_samples: 20000
+max_eval_samples: 500
+
+max_steps: 150
+
+# ---- DeepSpeed ----
+deepspeed: "configs/grpo/ds_zero2.json"
+
+# ---- Output ----
+output_dir: "outputs/opd/qwen3_1.7b_opd"
+report_to: "tensorboard"
