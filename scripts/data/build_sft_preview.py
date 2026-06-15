@@ -2,8 +2,8 @@
 从 HF 数学推理数据集构建统一 JSONL 格式的 SFT 数据。
 
 用法:
-    python scripts/build_sft_preview.py --dataset AI-MO/NuminaMath-CoT --max-samples 5000 --output data/processed/sft_numinamath_5k.jsonl
-    python scripts/build_sft_preview.py --dataset EleutherAI/hendrycks_math --split train --max-samples 20000 --output data/processed/sft_math_train_7.5k.jsonl
+    python scripts/data/build_sft_preview.py --dataset AI-MO/NuminaMath-CoT --max-samples 5000 --output data/processed/sft_numinamath_5k.jsonl
+    python scripts/data/build_sft_preview.py --dataset EleutherAI/hendrycks_math --split train --max-samples 20000 --output data/processed/sft_math_train_7.5k.jsonl
 """
 
 import argparse

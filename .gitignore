@@ -5,33 +5,60 @@ __pycache__/
 
 # Environments
 .env
-.venv/
-venv/
 *.egg-info/
-
-# Large model/data/cache files
-models/
-data/hf_datasets/
-data/raw/
-data/processed/
-outputs/
-logs/
 
 # Hugging Face / wandb
 .cache/
 wandb/
-.huggingface/
 
 # OS/editor
-.DS_Store
 .vscode/
 
-
-# Docs & AI Configuration Files 
-CLAUDE.md
+# Docs
 /docs
+CLAUDE.md
 
 # Temporary & Experimental Scripts
 *_smoke.py
 configs/sft/*_smoke.yaml
 scripts/demo
+
+# Folders — keep directory structure, ignore contents
+# Pattern: parent/* → !parent/keepme/ → parent/keepme/* → !parent/keepme/.gitkeep
+
+# data/ — ignore all, keep processed/ and hf_datasets/ as empty dirs
+data/*
+!data/processed/
+!data/hf_datasets/
+data/processed/*
+!data/processed/.gitkeep
+data/hf_datasets/*
+!data/hf_datasets/.gitkeep
+
+# logs/
+logs/*
+!logs/.gitkeep
+
+# models/ — ignore all, keep only two Qwen model dirs as empty dirs
+models/*
+!models/Qwen3-1.7B-Base/
+!models/Qwen3-32B-Base/
+models/Qwen3-1.7B-Base/*
+!models/Qwen3-1.7B-Base/.gitkeep
+models/Qwen3-32B-Base/*
+!models/Qwen3-32B-Base/.gitkeep
+
+# outputs/ — ignore all, keep eval/ grpo/ opd/ sft/ as empty dirs
+outputs/*
+!outputs/eval/
+!outputs/grpo/
+!outputs/opd/
+!outputs/sft/
+outputs/eval/*
+!outputs/eval/.gitkeep
+outputs/grpo/*
+!outputs/grpo/.gitkeep
+outputs/opd/*
+!outputs/opd/.gitkeep
+outputs/sft/*
+!outputs/sft/.gitkeep

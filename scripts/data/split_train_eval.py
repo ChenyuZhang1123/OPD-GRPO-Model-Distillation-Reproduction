@@ -4,7 +4,7 @@ Splits by (source, subject, level) so eval covers all domains evenly.
 Groups with < 5 samples go entirely to train to avoid degenerate eval cells.
 
 Usage:
-    python scripts/split_train_eval.py \
+    python scripts/data/split_train_eval.py \
         --input data/processed/sft_stage1_math_12.5k.jsonl \
         --train-out data/processed/sft_train.jsonl \
         --eval-out data/processed/sft_eval.jsonl \

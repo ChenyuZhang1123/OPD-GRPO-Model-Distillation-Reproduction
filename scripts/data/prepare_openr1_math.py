@@ -6,13 +6,13 @@ writes train/eval JSONL files ready for GRPOTrainer.
 
 Usage:
     # Full download and process (default: 20k train / 500 eval)
-    python scripts/prepare_openr1_math.py
+    python scripts/data/prepare_openr1_math.py
 
     # Custom sizes
-    python scripts/prepare_openr1_math.py --max-train-samples 8000 --max-eval-samples 300
+    python scripts/data/prepare_openr1_math.py --max-train-samples 8000 --max-eval-samples 300
 
     # Offline
-    python scripts/prepare_openr1_math.py --local-files-only
+    python scripts/data/prepare_openr1_math.py --local-files-only
 
 Output:
     data/processed/openr1_math_grpo_train.jsonl

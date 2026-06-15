@@ -12,7 +12,7 @@
     "type": "WarmupCosineLR",
     "params": {
       "warmup_min_ratio": 0.0,
-      "warmup_num_steps": 50,
+      "warmup_num_steps": "auto",
       "cos_min_ratio": 0.0,
       "total_num_steps": "auto",
       "warmup_type": "linear"
